@@ -20,7 +20,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Sintassi PHP
         run: for f in *.php; do php -l "$f"; done
       - name: Sintassi JavaScript
@@ -38,7 +38,7 @@ jobs:
       group: production
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Chiave SSH
         id: ssh
         env:
