@@ -412,7 +412,9 @@ try {
                 $tg = groups_of((string)$r['typed']);
                 foreach ($sg as $k => $g) {
                     $a = array_slice(cw_split($g), 0, 10);
-                    $t = array_slice(cw_split($tg[$k] ?? ''), 0, 20);
+                    // "_" = gruppo saltato per intero nella trascrizione continua
+                    $typedG = $tg[$k] ?? '';
+                    $t = array_slice(cw_split($typedG === '_' ? '' : $typedG), 0, 20);
                     foreach (align_chars($a, $t) as [$sc, $tc]) {
                         if ($sc === null) {
                             continue;

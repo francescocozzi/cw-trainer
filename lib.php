@@ -215,6 +215,7 @@ function cw_clean_settings($in): array
         'glen' => cw_clean_int($in['glen'] ?? null, 1, 10, 5),
         'randLen' => !empty($in['randLen']),
         'mins' => cw_clean_int($in['mins'] ?? null, 1, 10, 5),
+        'noSpace' => !empty($in['noSpace']),
     ];
 }
 
