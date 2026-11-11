@@ -81,4 +81,4 @@ Nel riconoscimento rapido si può rispondere a voce con l’alfabeto NATO o con 
 
 ## Licenza
 
-Il codice è distribuito con licenza MIT (file `LICENSE`). Sono esclusi il logo ARI (`ari-logo*.png`), che è un marchio dell’Associazione Radioamatori Italiani usato con il permesso della sezione di Bari e non va riutilizzato, e i font, che hanno la propria licenza SIL OFL 1.1 nella cartella `fonts`. Chi adatta l’app per un’altra sezione deve togliere i file del logo e i riferimenti in `index.html` e `sw.php`.
+Il codice è distribuito con licenza MIT (file `LICENSE`). Come indicato nel file `NOTICE`, sono esclusi il logo ARI (`ari-logo*.png`), che è un marchio dell’Associazione Radioamatori Italiani usato con il permesso della sezione di Bari e non va riutilizzato, e i font, che hanno la propria licenza SIL OFL 1.1 nella cartella `fonts`. Chi adatta l’app per un’altra sezione deve togliere i file del logo e i riferimenti in `index.html` e `sw.php`.

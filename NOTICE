@@ -1,0 +1,17 @@
+CW Trainer
+Copyright (c) 2026 Francesco Cozzi
+
+The code is licensed under the MIT License (see LICENSE).
+The MIT License does not apply to the following files:
+
+The MIT License above does not apply to the following files:
+
+- ari-logo.png, ari-logo-144.png, ari-logo-notte-144.png
+  The ARI logo is a mark of the Associazione Radioamatori Italiani. It is used
+  here with the permission of the ARI section of Bari and is not licensed for
+  reuse. If you adapt this project, remove these files and the references to
+  them in index.html and sw.php.
+
+- fonts/*.woff2
+  Barlow Condensed and JetBrains Mono are distributed under the SIL Open Font
+  License 1.1; see fonts/OFL-BarlowCondensed.txt and fonts/OFL-JetBrainsMono.txt.
