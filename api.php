@@ -353,10 +353,49 @@ try {
             }
             out(200, ['id' => $id]);
 
+        case 'instant':
+            // Risposte del riconoscimento rapido, inviate a blocchi dall'app
+            require_post($method);
+            $u = require_user($db, $cfg);
+            if (time() - (int)($_SESSION['last_instant'] ?? 0) < 2) {
+                out(429, ['error' => 'Troppi invii in poco tempo.']);
+            }
+            $items = $in['items'] ?? null;
+            if (!is_array($items) || !$items || count($items) > 200) {
+                throw new CwError('Risposte non valide.');
+            }
+            $allowed = array_flip(cw_split(CW_CHARS));
+            $rows = [];
+            foreach ($items as $it) {
+                $c = is_array($it) && is_string($it['c'] ?? null) ? $it['c'] : '';
+                $a = is_array($it) && is_string($it['a'] ?? null) ? $it['a'] : '';
+                if (!isset($allowed[$c]) || !isset($allowed[$a])) {
+                    throw new CwError('Carattere non valido.');
+                }
+                $ms = isset($it['ms']) && is_numeric($it['ms']) ? max(0, min(60000, (int)$it['ms'])) : null;
+                $rows[] = [$u['id'], int_in($it, 't', 0, 4102444800000), $c, $a, $ms, empty($it['v']) ? 0 : 1, int_in($it, 'w', 1, 100)];
+            }
+            $db->beginTransaction();
+            $st = $db->prepare('INSERT INTO instant (user_id, ts, ch, ans, ms, voice, wpm) VALUES (?, ?, ?, ?, ?, ?, ?)');
+            foreach ($rows as $r) {
+                $st->execute($r);
+            }
+            // Tiene al massimo 100.000 risposte per utente
+            $st = $db->prepare('SELECT id FROM instant WHERE user_id = ? ORDER BY ts DESC, id DESC LIMIT 1 OFFSET 100000');
+            $st->execute([$u['id']]);
+            $cut = $st->fetchColumn();
+            if ($cut) {
+                $db->prepare('DELETE FROM instant WHERE user_id = ? AND id <= ?')->execute([$u['id'], $cut]);
+            }
+            $db->commit();
+            $_SESSION['last_instant'] = time();
+            out(200, ['ok' => true, 'n' => count($rows)]);
+
         case 'clear_history':
             require_post($method);
             $u = require_user($db, $cfg);
             $db->prepare('DELETE FROM results WHERE user_id = ?')->execute([$u['id']]);
+            $db->prepare('DELETE FROM instant WHERE user_id = ?')->execute([$u['id']]);
             out(200, ['ok' => true]);
 
         case 'password':
@@ -432,12 +471,66 @@ try {
                 }
             }
 
-            // Giorni di fila con almeno una sessione, contando fino a oggi (o ieri)
-            $st = $db->prepare('SELECT ts FROM results WHERE user_id = ?');
-            $st->execute([$u['id']]);
-            $active = [];
+            // Riconoscimento rapido: precisione e tempi di risposta. I tempi contano solo le
+            // risposte giuste date toccando; oltre 10 s era una distrazione, non un'esitazione
+            $st = $db->prepare('SELECT ts, ch, ans, ms FROM instant WHERE user_id = ? AND ts >= ? ORDER BY ts');
+            $st->execute([$u['id'], $since]);
+            $iDays = [];
+            $iChars = [];
+            $iConf = [];
+            $iSum = ['n' => 0, 'ok' => 0, 'ms' => 0, 'msN' => 0];
             foreach ($st as $r) {
-                $active[$dayOf((int)$r['ts'])] = true;
+                $day = $dayOf((int)$r['ts']);
+                $ok = $r['ch'] === $r['ans'];
+                $ms = $ok && $r['ms'] !== null && (int)$r['ms'] <= 10000 ? (int)$r['ms'] : null;
+                foreach ([&$iDays[$day], &$iChars[$r['ch']], &$iSum] as &$b) {
+                    $b = $b ?? ['n' => 0, 'ok' => 0, 'ms' => 0, 'msN' => 0];
+                    $b['n']++;
+                    $b['ok'] += $ok ? 1 : 0;
+                    if ($ms !== null) {
+                        $b['ms'] += $ms;
+                        $b['msN']++;
+                    }
+                }
+                unset($b);
+                if (!$ok) {
+                    $key = $r['ch'] . "\x1f" . $r['ans'];
+                    $iConf[$key] = ($iConf[$key] ?? 0) + 1;
+                }
+            }
+            $avg = function (array $b): ?int {
+                return $b['msN'] ? (int)round($b['ms'] / $b['msN']) : null;
+            };
+            $acc = function (array $b): int {
+                return $b['n'] ? (int)round($b['ok'] / $b['n'] * 100) : 0;
+            };
+            ksort($iDays);
+            $instant = [
+                'summary' => ['answers' => $iSum['n'], 'acc' => $acc($iSum), 'ms' => $avg($iSum), 'activeDays' => count($iDays)],
+                'days' => [],
+                'chars' => [],
+                'confusions' => [],
+            ];
+            foreach ($iDays as $day => $b) {
+                $instant['days'][] = ['day' => gmdate('Y-m-d', $day * 86400), 'n' => $b['n'], 'acc' => $acc($b), 'ms' => $avg($b)];
+            }
+            foreach ($iChars as $c => $b) {
+                $instant['chars'][] = ['c' => (string)$c, 'n' => $b['n'], 'err' => $b['n'] - $b['ok'], 'ms' => $avg($b)];
+            }
+            arsort($iConf);
+            foreach (array_slice($iConf, 0, 10, true) as $key => $n) {
+                [$sc, $tc] = explode("\x1f", (string)$key);
+                $instant['confusions'][] = ['s' => $sc, 't' => $tc, 'n' => $n];
+            }
+
+            // Giorni di fila con almeno una sessione (gruppi o rapido), contando fino a oggi (o ieri)
+            $active = [];
+            foreach (['results', 'instant'] as $table) {
+                $st = $db->prepare("SELECT ts FROM $table WHERE user_id = ?");
+                $st->execute([$u['id']]);
+                foreach ($st as $r) {
+                    $active[$dayOf((int)$r['ts'])] = true;
+                }
             }
             $today = $dayOf(time() * 1000);
             $streak = 0;
@@ -478,6 +571,7 @@ try {
                 'days' => $daysOut,
                 'chars' => $charsOut,
                 'confusions' => $confOut,
+                'instant' => $instant,
             ]);
 
         default:
