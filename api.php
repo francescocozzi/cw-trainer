@@ -234,6 +234,96 @@ function align_chars(array $a, array $b): array
     return $pairs;
 }
 
+/** Classi dell'utente: quelle in cui è allievo (con gli esercizi attivi) e, se tutor, le sue. */
+function class_payload(PDO $db, int $uid): array
+{
+    // $mine: per gli esercizi delle classi dell'allievo, anche a che punto è lui con l'obiettivo
+    $assign = function (int $classId, bool $mine = false) use ($db, $uid): array {
+        $st = $db->prepare('SELECT id, title, settings, goal, due, created_at FROM assignments WHERE class_id = ? AND archived = 0 ORDER BY created_at, id');
+        $st->execute([$classId]);
+        $out = [];
+        foreach ($st->fetchAll() as $a) {
+            $goal = $a['goal'] ? json_decode($a['goal'], true) : null;
+            $row = ['id' => (int)$a['id'], 'title' => $a['title'], 'settings' => json_decode($a['settings'], true),
+                'goal' => $goal, 'due' => $a['due'], 'created' => (int)$a['created_at']];
+            if ($mine) {
+                $rows = assignment_rows($db, (int)$a['id'], $uid)[$uid] ?? ['g' => [], 'i' => []];
+                $row['status'] = cw_goal_status($goal, $rows['g'], $rows['i']);
+            }
+            $out[] = $row;
+        }
+        return $out;
+    };
+    $st = $db->prepare('SELECT c.id, c.name, u.username AS tutor FROM class_members m JOIN classes c ON c.id = m.class_id JOIN users u ON u.id = c.tutor_id WHERE m.user_id = ? ORDER BY c.name');
+    $st->execute([$uid]);
+    $joined = [];
+    foreach ($st->fetchAll() as $c) {
+        $joined[] = ['id' => (int)$c['id'], 'name' => $c['name'], 'tutor' => $c['tutor'], 'assignments' => $assign((int)$c['id'], true)];
+    }
+    $tutor = cw_is_tutor($db, $uid);
+    $own = [];
+    if ($tutor) {
+        $st = $db->prepare('SELECT id, name, code FROM classes WHERE tutor_id = ? ORDER BY created_at, id');
+        $st->execute([$uid]);
+        foreach ($st->fetchAll() as $c) {
+            $m = $db->prepare('SELECT u.id, u.username FROM class_members m JOIN users u ON u.id = m.user_id WHERE m.class_id = ? ORDER BY u.username');
+            $m->execute([$c['id']]);
+            $members = array_map(function ($r) { return ['id' => (int)$r['id'], 'username' => $r['username']]; }, $m->fetchAll());
+            $own[] = ['id' => (int)$c['id'], 'name' => $c['name'], 'code' => $c['code'], 'members' => $members, 'assignments' => $assign((int)$c['id'])];
+        }
+    }
+    return ['tutor' => $tutor, 'joined' => $joined, 'own' => $own];
+}
+
+/**
+ * Risultati collegati a un esercizio, per allievo e in ordine di tempo:
+ * 'g' => [[ts, precisione], ...] dei gruppi, 'i' => [[ts, giusta, ms], ...] del Rapido.
+ * Con $uid solo quell'allievo, altrimenti tutti quelli ancora nella classe dell'esercizio.
+ */
+function assignment_rows(PDO $db, int $aid, ?int $uid = null): array
+{
+    $who = $uid !== null ? 'AND x.user_id = ?' : 'AND x.user_id IN (SELECT m.user_id FROM class_members m JOIN assignments a ON a.class_id = m.class_id WHERE a.id = ?)';
+    $out = [];
+    $st = $db->prepare("SELECT x.user_id, x.ts, x.acc FROM results x WHERE x.assignment_id = ? $who ORDER BY x.ts, x.id");
+    $st->execute([$aid, $uid ?? $aid]);
+    foreach ($st as $r) {
+        $out[(int)$r['user_id']]['g'][] = [(int)$r['ts'], (int)$r['acc']];
+    }
+    $st = $db->prepare("SELECT x.user_id, x.ts, x.ch, x.ans, x.ms FROM instant x WHERE x.assignment_id = ? $who ORDER BY x.ts, x.id");
+    $st->execute([$aid, $uid ?? $aid]);
+    foreach ($st as $r) {
+        $out[(int)$r['user_id']]['i'][] = [(int)$r['ts'], $r['ch'] === $r['ans'], $r['ms'] === null ? null : (int)$r['ms']];
+    }
+    foreach ($out as &$v) {
+        $v += ['g' => [], 'i' => []];
+    }
+    unset($v);
+    return $out;
+}
+
+/** Esercizi attivi delle classi di cui l'utente è allievo: solo a questi si collegano i risultati. */
+function member_assignments(PDO $db, int $uid): array
+{
+    $st = $db->prepare('SELECT a.id FROM assignments a JOIN class_members m ON m.class_id = a.class_id WHERE m.user_id = ? AND a.archived = 0');
+    $st->execute([$uid]);
+    return array_flip(array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)));
+}
+
+/** La classe, solo se appartiene al tutor collegato. */
+function tutor_class(PDO $db, array $u, $classId): array
+{
+    if (!cw_is_tutor($db, $u['id'])) {
+        out(403, ['error' => 'Solo i tutor possono gestire le classi.']);
+    }
+    $st = $db->prepare('SELECT id, name, code FROM classes WHERE id = ? AND tutor_id = ?');
+    $st->execute([is_numeric($classId) ? (int)$classId : 0, $u['id']]);
+    $c = $st->fetch();
+    if (!$c) {
+        throw new CwError('Classe non trovata.', 404);
+    }
+    return $c;
+}
+
 function groups_of(string $s): array
 {
     $s = trim($s);
@@ -303,7 +393,7 @@ try {
                     'sent' => $r['sent'], 'typed' => $r['typed'],
                 ];
             }
-            out(200, ['user' => $u, 'settings' => $settings, 'history' => $history]);
+            out(200, ['user' => $u, 'settings' => $settings, 'history' => $history, 'classes' => class_payload($db, $u['id'])]);
 
         case 'settings':
             require_post($method);
@@ -328,6 +418,8 @@ try {
             $sent = clean_sent($in['sent'] ?? null);
             $nGroups = count(groups_of($sent));
             $chars = cw_clean_chars($in['s'] ?? '');
+            $as = isset($in['as']) && is_numeric($in['as']) ? (int)$in['as'] : 0;
+            $as = $as && isset(member_assignments($db, $u['id'])[$as]) ? $as : null;
             $row = [
                 $u['id'],
                 int_in($in, 'd', 0, 4102444800000),
@@ -339,8 +431,9 @@ try {
                 int_in($in, 'total', 0, 100000),
                 $sent,
                 clean_typed($in['typed'] ?? '', $nGroups),
+                $as,
             ];
-            $db->prepare('INSERT INTO results (user_id, ts, chars, wpm, eff, acc, errors, total, sent, typed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute($row);
+            $db->prepare('INSERT INTO results (user_id, ts, chars, wpm, eff, acc, errors, total, sent, typed, assignment_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute($row);
             $id = (int)$db->lastInsertId();
             $_SESSION['last_result'] = time();
             // Tiene al massimo N sessioni per utente
@@ -365,6 +458,7 @@ try {
                 throw new CwError('Risposte non valide.');
             }
             $allowed = array_flip(cw_split(CW_CHARS));
+            $mine = member_assignments($db, $u['id']);
             $rows = [];
             foreach ($items as $it) {
                 $c = is_array($it) && is_string($it['c'] ?? null) ? $it['c'] : '';
@@ -373,10 +467,11 @@ try {
                     throw new CwError('Carattere non valido.');
                 }
                 $ms = isset($it['ms']) && is_numeric($it['ms']) ? max(0, min(60000, (int)$it['ms'])) : null;
-                $rows[] = [$u['id'], int_in($it, 't', 0, 4102444800000), $c, $a, $ms, empty($it['v']) ? 0 : 1, int_in($it, 'w', 1, 100)];
+                $as = isset($it['as']) && is_numeric($it['as']) && isset($mine[(int)$it['as']]) ? (int)$it['as'] : null;
+                $rows[] = [$u['id'], int_in($it, 't', 0, 4102444800000), $c, $a, $ms, empty($it['v']) ? 0 : 1, int_in($it, 'w', 1, 100), $as];
             }
             $db->beginTransaction();
-            $st = $db->prepare('INSERT INTO instant (user_id, ts, ch, ans, ms, voice, wpm) VALUES (?, ?, ?, ?, ?, ?, ?)');
+            $st = $db->prepare('INSERT INTO instant (user_id, ts, ch, ans, ms, voice, wpm, assignment_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
             foreach ($rows as $r) {
                 $st->execute($r);
             }
@@ -416,6 +511,202 @@ try {
             session_destroy();
             setcookie('cwsess', '', ['expires' => time() - 3600] + $cookieOpts);
             out(200, ['ok' => true]);
+
+        // ---- Classi: allievo ----
+        case 'classes':
+            $u = require_user($db, $cfg);
+            out(200, ['classes' => class_payload($db, $u['id'])]);
+
+        case 'class_join':
+            require_post($method);
+            $u = require_user($db, $cfg);
+            // Il codice si indovina solo per tentativi: stesso limite degli accessi
+            throttle($db, $cfg, '#join' . $u['id']);
+            $st = $db->prepare('SELECT id, name, tutor_id FROM classes WHERE code = ?');
+            $st->execute([cw_normalize_code($in['code'] ?? '')]);
+            $c = $st->fetch();
+            if (!$c) {
+                record_attempt($db, $cfg, '#join' . $u['id']);
+                throw new CwError('Codice non valido. Controllalo con il tuo tutor.');
+            }
+            if ((int)$c['tutor_id'] === $u['id']) {
+                throw new CwError('Sei il tutor di questa classe.');
+            }
+            $st = $db->prepare('SELECT COUNT(*) FROM class_members WHERE class_id = ?');
+            $st->execute([$c['id']]);
+            if ((int)$st->fetchColumn() >= 100) {
+                throw new CwError('La classe è al completo.');
+            }
+            $st = $db->prepare('SELECT 1 FROM class_members WHERE class_id = ? AND user_id = ?');
+            $st->execute([$c['id'], $u['id']]);
+            if (!$st->fetchColumn()) {
+                $db->prepare('INSERT INTO class_members (class_id, user_id, joined_at) VALUES (?, ?, ?)')->execute([$c['id'], $u['id'], time()]);
+            }
+            out(200, ['name' => $c['name'], 'classes' => class_payload($db, $u['id'])]);
+
+        case 'class_leave':
+            require_post($method);
+            $u = require_user($db, $cfg);
+            $db->prepare('DELETE FROM class_members WHERE class_id = ? AND user_id = ?')->execute([int_in($in, 'id', 0, PHP_INT_MAX), $u['id']]);
+            out(200, ['classes' => class_payload($db, $u['id'])]);
+
+        // ---- Classi: tutor ----
+        case 'class_create':
+            require_post($method);
+            $u = require_user($db, $cfg);
+            if (!cw_is_tutor($db, $u['id'])) {
+                out(403, ['error' => 'Solo i tutor possono creare classi.']);
+            }
+            $name = cw_clean_name($in['name'] ?? '', 60);
+            if ($name === '') {
+                throw new CwError('Dai un nome alla classe.');
+            }
+            $st = $db->prepare('SELECT COUNT(*) FROM classes WHERE tutor_id = ?');
+            $st->execute([$u['id']]);
+            if ((int)$st->fetchColumn() >= 20) {
+                throw new CwError('Hai già 20 classi: eliminane una prima di crearne un’altra.');
+            }
+            $db->prepare('INSERT INTO classes (tutor_id, name, code, created_at) VALUES (?, ?, ?, ?)')->execute([$u['id'], $name, cw_new_class_code(), time()]);
+            out(200, ['id' => (int)$db->lastInsertId(), 'classes' => class_payload($db, $u['id'])]);
+
+        case 'class_delete':
+            require_post($method);
+            $u = require_user($db, $cfg);
+            $c = tutor_class($db, $u, $in['id'] ?? null);
+            $db->beginTransaction();
+            $db->prepare('DELETE FROM assignments WHERE class_id = ?')->execute([$c['id']]);
+            $db->prepare('DELETE FROM class_members WHERE class_id = ?')->execute([$c['id']]);
+            $db->prepare('DELETE FROM classes WHERE id = ?')->execute([$c['id']]);
+            $db->commit();
+            out(200, ['classes' => class_payload($db, $u['id'])]);
+
+        case 'class_code':
+            // Nuovo codice: quello vecchio smette di funzionare, gli allievi già entrati restano
+            require_post($method);
+            $u = require_user($db, $cfg);
+            $c = tutor_class($db, $u, $in['id'] ?? null);
+            $db->prepare('UPDATE classes SET code = ? WHERE id = ?')->execute([cw_new_class_code(), $c['id']]);
+            out(200, ['classes' => class_payload($db, $u['id'])]);
+
+        case 'class_kick':
+            require_post($method);
+            $u = require_user($db, $cfg);
+            $c = tutor_class($db, $u, $in['id'] ?? null);
+            $db->prepare('DELETE FROM class_members WHERE class_id = ? AND user_id = ?')->execute([$c['id'], int_in($in, 'user', 0, PHP_INT_MAX)]);
+            out(200, ['classes' => class_payload($db, $u['id'])]);
+
+        case 'assign_create':
+            require_post($method);
+            $u = require_user($db, $cfg);
+            $c = tutor_class($db, $u, $in['class'] ?? null);
+            $title = cw_clean_name($in['title'] ?? '', 60);
+            if ($title === '') {
+                throw new CwError('Dai un titolo all’esercizio.');
+            }
+            $st = $db->prepare('SELECT COUNT(*) FROM assignments WHERE class_id = ? AND archived = 0');
+            $st->execute([$c['id']]);
+            if ((int)$st->fetchColumn() >= 50) {
+                throw new CwError('La classe ha già 50 esercizi: archiviane qualcuno.');
+            }
+            $settings = json_encode(cw_clean_assignment($in['settings'] ?? null), JSON_UNESCAPED_UNICODE);
+            $goal = cw_clean_goal($in['goal'] ?? null);
+            $db->prepare('INSERT INTO assignments (class_id, title, settings, goal, due, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+               ->execute([$c['id'], $title, $settings, $goal ? json_encode($goal) : null, cw_clean_due($in['due'] ?? null), time()]);
+            out(200, ['classes' => class_payload($db, $u['id'])]);
+
+        case 'assign_archive':
+            require_post($method);
+            $u = require_user($db, $cfg);
+            $st = $db->prepare('SELECT a.id FROM assignments a JOIN classes c ON c.id = a.class_id WHERE a.id = ? AND c.tutor_id = ?');
+            $st->execute([int_in($in, 'id', 0, PHP_INT_MAX), $u['id']]);
+            $aid = $st->fetchColumn();
+            if (!$aid) {
+                throw new CwError('Esercizio non trovato.', 404);
+            }
+            $db->prepare('UPDATE assignments SET archived = 1 WHERE id = ?')->execute([$aid]);
+            out(200, ['classes' => class_payload($db, $u['id'])]);
+
+        case 'class_progress':
+            // Il tutor vede solo i risultati degli esercizi assegnati, e solo degli allievi ancora in classe
+            $u = require_user($db, $cfg);
+            $c = tutor_class($db, $u, $_GET['id'] ?? null);
+            $st = $db->prepare('SELECT id, title, goal, due FROM assignments WHERE class_id = ? AND archived = 0 ORDER BY created_at, id');
+            $st->execute([$c['id']]);
+            $assignments = [];
+            foreach ($st as $a) {
+                $assignments[(int)$a['id']] = ['id' => (int)$a['id'], 'title' => $a['title'], 'goal' => $a['goal'] ? json_decode($a['goal'], true) : null,
+                    'due' => $a['due'], 'students' => [], 'chars' => []];
+            }
+            $members = $db->prepare('SELECT u.id, u.username FROM class_members m JOIN users u ON u.id = m.user_id WHERE m.class_id = ? ORDER BY u.username');
+            $members->execute([$c['id']]);
+            $members = array_map(function ($r) { return ['id' => (int)$r['id'], 'username' => $r['username']]; }, $members->fetchAll());
+            if ($assignments && $members) {
+                $aIn = implode(',', array_keys($assignments));
+                $st = $db->prepare("SELECT r.assignment_id, r.user_id, r.ts, r.acc, r.sent, r.typed FROM results r
+                    JOIN class_members m ON m.user_id = r.user_id AND m.class_id = ?
+                    WHERE r.assignment_id IN ($aIn) ORDER BY r.ts");
+                $st->execute([$c['id']]);
+                foreach ($st as $r) {
+                    $a = &$assignments[(int)$r['assignment_id']];
+                    $g = &$a['students'][(int)$r['user_id']]['g'];
+                    $g = $g ?? ['n' => 0, 'best' => 0, 'last' => 0, 'lastTs' => 0];
+                    $g['n']++;
+                    $g['best'] = max($g['best'], (int)$r['acc']);
+                    $g['last'] = (int)$r['acc'];
+                    $g['lastTs'] = (int)$r['ts'];
+                    $tg = groups_of((string)$r['typed']);
+                    foreach (groups_of((string)$r['sent']) as $k => $grp) {
+                        $typedG = $tg[$k] ?? '';
+                        foreach (align_chars(array_slice(cw_split($grp), 0, 10), array_slice(cw_split($typedG === '_' ? '' : $typedG), 0, 20)) as [$sc, $tc]) {
+                            if ($sc !== null) {
+                                $a['chars'][$sc]['n'] = ($a['chars'][$sc]['n'] ?? 0) + 1;
+                                $a['chars'][$sc]['err'] = ($a['chars'][$sc]['err'] ?? 0) + ($tc !== $sc ? 1 : 0);
+                            }
+                        }
+                    }
+                    unset($a, $g);
+                }
+                $st = $db->prepare("SELECT i.assignment_id, i.user_id, i.ch, i.ans, i.ms FROM instant i
+                    JOIN class_members m ON m.user_id = i.user_id AND m.class_id = ?
+                    WHERE i.assignment_id IN ($aIn)");
+                $st->execute([$c['id']]);
+                foreach ($st as $r) {
+                    $a = &$assignments[(int)$r['assignment_id']];
+                    $q = &$a['students'][(int)$r['user_id']]['i'];
+                    $q = $q ?? ['n' => 0, 'ok' => 0, 'ms' => 0, 'msN' => 0];
+                    $ok = $r['ch'] === $r['ans'];
+                    $q['n']++;
+                    $q['ok'] += $ok ? 1 : 0;
+                    if ($ok && $r['ms'] !== null && (int)$r['ms'] <= 10000) {
+                        $q['ms'] += (int)$r['ms'];
+                        $q['msN']++;
+                    }
+                    $a['chars'][$r['ch']]['n'] = ($a['chars'][$r['ch']]['n'] ?? 0) + 1;
+                    $a['chars'][$r['ch']]['err'] = ($a['chars'][$r['ch']]['err'] ?? 0) + ($ok ? 0 : 1);
+                    unset($a, $q);
+                }
+            }
+            $outA = [];
+            foreach ($assignments as $a) {
+                $rows = $a['goal'] ? assignment_rows($db, $a['id']) : [];
+                $students = [];
+                foreach ($members as $m) {
+                    $g = $a['students'][$m['id']]['g'] ?? null;
+                    $q = $a['students'][$m['id']]['i'] ?? null;
+                    $students[] = [
+                        'id' => $m['id'],
+                        'g' => $g,
+                        'i' => $q ? ['n' => $q['n'], 'acc' => (int)round($q['ok'] / $q['n'] * 100), 'ms' => $q['msN'] ? (int)round($q['ms'] / $q['msN']) : null] : null,
+                        'status' => cw_goal_status($a['goal'], $rows[$m['id']]['g'] ?? [], $rows[$m['id']]['i'] ?? []),
+                    ];
+                }
+                $chars = [];
+                foreach ($a['chars'] as $ch => $v) {
+                    $chars[] = ['c' => (string)$ch, 'n' => $v['n'], 'err' => $v['err']];
+                }
+                $outA[] = ['id' => $a['id'], 'title' => $a['title'], 'goal' => $a['goal'], 'due' => $a['due'], 'students' => $students, 'chars' => $chars];
+            }
+            out(200, ['members' => $members, 'assignments' => $outA]);
 
         case 'stats':
             $u = require_user($db, $cfg);

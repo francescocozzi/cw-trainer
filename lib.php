@@ -75,6 +75,36 @@ function cw_migrate(PDO $db, string $driver): void
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             ip VARCHAR(45) NOT NULL, username VARCHAR(64) NOT NULL, ts INT NOT NULL,
             KEY ts (ts)) $t");
+        $db->exec("CREATE TABLE IF NOT EXISTS tutors (
+            user_id INT UNSIGNED PRIMARY KEY,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) $t");
+        $db->exec("CREATE TABLE IF NOT EXISTS classes (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            tutor_id INT UNSIGNED NOT NULL,
+            name VARCHAR(60) NOT NULL,
+            code VARCHAR(16) NOT NULL UNIQUE,
+            created_at INT NOT NULL,
+            FOREIGN KEY (tutor_id) REFERENCES users(id) ON DELETE CASCADE) $t");
+        $db->exec("CREATE TABLE IF NOT EXISTS class_members (
+            class_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            joined_at INT NOT NULL,
+            PRIMARY KEY (class_id, user_id),
+            FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) $t");
+        $db->exec("CREATE TABLE IF NOT EXISTS assignments (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            class_id INT UNSIGNED NOT NULL,
+            title VARCHAR(60) NOT NULL,
+            settings TEXT NOT NULL,
+            created_at INT NOT NULL,
+            archived TINYINT NOT NULL DEFAULT 0,
+            KEY class_id (class_id),
+            FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE) $t");
+        cw_add_column($db, $driver, 'results', 'assignment_id', 'INT UNSIGNED NULL');
+        cw_add_column($db, $driver, 'instant', 'assignment_id', 'INT UNSIGNED NULL');
+        cw_add_column($db, $driver, 'assignments', 'goal', 'TEXT NULL');
+        cw_add_column($db, $driver, 'assignments', 'due', 'VARCHAR(10) NULL');
         return;
     }
     $db->exec('CREATE TABLE IF NOT EXISTS users (
@@ -108,6 +138,48 @@ function cw_migrate(PDO $db, string $driver): void
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ip TEXT NOT NULL, username TEXT NOT NULL, ts INTEGER NOT NULL)');
     $db->exec('CREATE INDEX IF NOT EXISTS login_attempts_ts ON login_attempts (ts)');
+
+    // ---- Classi: un tutor crea classi, gli allievi entrano con un codice di invito ----
+    $db->exec('CREATE TABLE IF NOT EXISTS tutors (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE)');
+    $db->exec('CREATE TABLE IF NOT EXISTS classes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tutor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        code TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL)');
+    $db->exec('CREATE TABLE IF NOT EXISTS class_members (
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        joined_at INTEGER NOT NULL,
+        PRIMARY KEY (class_id, user_id))');
+    // Gli esercizi archiviati spariscono per gli allievi ma restano collegati ai risultati
+    $db->exec('CREATE TABLE IF NOT EXISTS assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        settings TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        archived INTEGER NOT NULL DEFAULT 0)');
+    $db->exec('CREATE INDEX IF NOT EXISTS assignments_class ON assignments (class_id)');
+    cw_add_column($db, $driver, 'results', 'assignment_id', 'INTEGER');
+    cw_add_column($db, $driver, 'instant', 'assignment_id', 'INTEGER');
+    // Obiettivo (JSON) e scadenza (AAAA-MM-GG) degli esercizi assegnati, entrambi facoltativi
+    cw_add_column($db, $driver, 'assignments', 'goal', 'TEXT');
+    cw_add_column($db, $driver, 'assignments', 'due', 'TEXT');
+}
+
+/** Aggiunge una colonna a una tabella esistente, se manca (i database già installati). */
+function cw_add_column(PDO $db, string $driver, string $table, string $column, string $type): void
+{
+    if ($driver === 'sqlite') {
+        $cols = array_column($db->query("PRAGMA table_info($table)")->fetchAll(), 'name');
+    } else {
+        $cols = array_column($db->query("SHOW COLUMNS FROM $table")->fetchAll(), 'Field');
+    }
+    if (!in_array($column, $cols, true)) {
+        $db->exec("ALTER TABLE $table ADD COLUMN $column $type");
+    }
 }
 
 /** Errore con un messaggio mostrabile all’utente. */
@@ -215,6 +287,7 @@ function cw_clean_settings($in): array
     }
     $mode = is_string($in['mode'] ?? null) ? $in['mode'] : 'custom';
     $okMode = in_array($mode, ['custom', 'letters', 'numbers', 'mixed'], true)
+        || preg_match('/^class:[0-9]{1,10}$/', $mode)
         || (strpos($mode, 'set:') === 0 && isset($sets[substr($mode, 4)]));
     $wpm = cw_clean_int($in['wpm'] ?? null, 5, 60, 20);
     return [
@@ -241,7 +314,153 @@ function cw_delete_user(PDO $db, int $userId): void
     $db->beginTransaction();
     $db->prepare('DELETE FROM results WHERE user_id = ?')->execute([$userId]);
     $db->prepare('DELETE FROM instant WHERE user_id = ?')->execute([$userId]);
+    $db->prepare('DELETE FROM class_members WHERE user_id = ?')->execute([$userId]);
+    $db->prepare('DELETE FROM assignments WHERE class_id IN (SELECT id FROM classes WHERE tutor_id = ?)')->execute([$userId]);
+    $db->prepare('DELETE FROM class_members WHERE class_id IN (SELECT id FROM classes WHERE tutor_id = ?)')->execute([$userId]);
+    $db->prepare('DELETE FROM classes WHERE tutor_id = ?')->execute([$userId]);
+    $db->prepare('DELETE FROM tutors WHERE user_id = ?')->execute([$userId]);
     $db->prepare('DELETE FROM settings WHERE user_id = ?')->execute([$userId]);
     $db->prepare('DELETE FROM users WHERE id = ?')->execute([$userId]);
     $db->commit();
+}
+
+// ---- Classi ----
+
+function cw_is_tutor(PDO $db, int $userId): bool
+{
+    $st = $db->prepare('SELECT 1 FROM tutors WHERE user_id = ?');
+    $st->execute([$userId]);
+    return (bool)$st->fetchColumn();
+}
+
+/** Codice di invito: 8 caratteri senza quelli che si confondono (0/O, 1/I/L). */
+function cw_new_class_code(): string
+{
+    $chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    $c = '';
+    for ($i = 0; $i < 8; $i++) {
+        $c .= $chars[random_int(0, strlen($chars) - 1)];
+    }
+    return $c;
+}
+
+/** Il codice scritto dall'allievo: maiuscolo, senza spazi né trattini. */
+function cw_normalize_code($v): string
+{
+    return is_string($v) ? substr(preg_replace('/[^A-Z0-9]/', '', strtoupper($v)) ?? '', 0, 16) : '';
+}
+
+function cw_clean_name($v, int $max): string
+{
+    return is_string($v) ? trim(preg_replace('/[\x00-\x1F\x7F]/u', '', mb_substr($v, 0, $max)) ?? '') : '';
+}
+
+/**
+ * Le impostazioni che il tutor fissa per un esercizio: cosa si ascolta e a che velocità.
+ * Tono, volume, ritardo, risposta a voce e trascrizione a blocchi restano dell'allievo.
+ */
+function cw_clean_assignment($in): array
+{
+    $s = cw_clean_settings($in);
+    if ($s['chars'] === '') {
+        throw new CwError('Scegli almeno un carattere per l’esercizio.');
+    }
+    return [
+        'chars' => $s['chars'], 'wpm' => $s['wpm'], 'eff' => $s['eff'], 'extra' => $s['extra'],
+        'glen' => $s['glen'], 'randLen' => $s['randLen'], 'mins' => $s['mins'], 'pre' => $s['pre'],
+    ];
+}
+
+/**
+ * Obiettivo di un esercizio assegnato, facoltativo per ciascun tipo:
+ * gruppi = N sessioni con precisione almeno P%;
+ * rapido = le ultime N risposte con almeno P% giuste e, se indicato, tempo medio sotto ms.
+ */
+function cw_clean_goal($in): ?array
+{
+    $in = is_array($in) ? $in : [];
+    $g = is_array($in['groups'] ?? null) ? $in['groups'] : null;
+    $i = is_array($in['instant'] ?? null) ? $in['instant'] : null;
+    $goal = [
+        'groups' => $g ? ['n' => cw_clean_int($g['n'] ?? null, 1, 50, 3), 'acc' => cw_clean_int($g['acc'] ?? null, 50, 100, 90)] : null,
+        'instant' => $i ? [
+            'n' => cw_clean_int($i['n'] ?? null, 10, 500, 50),
+            'acc' => cw_clean_int($i['acc'] ?? null, 50, 100, 95),
+            'ms' => isset($i['ms']) && is_numeric($i['ms']) ? cw_clean_int($i['ms'], 200, 5000, 1000) : null,
+        ] : null,
+    ];
+    return $goal['groups'] || $goal['instant'] ? $goal : null;
+}
+
+function cw_clean_due($v): ?string
+{
+    if (!is_string($v) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $v, $m) || !checkdate((int)$m[2], (int)$m[3], (int)$m[1])) {
+        return null;
+    }
+    return $v;
+}
+
+/**
+ * A che punto è un allievo rispetto all'obiettivo.
+ * $groups: [[ts, precisione], ...] e $instant: [[ts, giusta, ms], ...], in ordine di tempo.
+ * doneTs è il momento in cui l'obiettivo è stato raggiunto la prima volta.
+ */
+function cw_goal_status(?array $goal, array $groups, array $instant): ?array
+{
+    if (!$goal) {
+        return null;
+    }
+    $out = ['done' => true, 'doneTs' => 0];
+    if ($goal['groups']) {
+        $need = $goal['groups']['n'];
+        $have = 0;
+        $ts = null;
+        foreach ($groups as [$t, $acc]) {
+            if ($acc >= $goal['groups']['acc'] && ++$have === $need) {
+                $ts = $t;
+            }
+        }
+        $out['groups'] = ['have' => min($have, $need), 'need' => $need, 'doneTs' => $ts];
+        $out['done'] = $out['done'] && $ts !== null;
+        $out['doneTs'] = max($out['doneTs'], (int)$ts);
+    }
+    if ($goal['instant']) {
+        $n = $goal['instant']['n'];
+        $win = [];
+        $ok = $msSum = $msN = 0;
+        $ts = null;
+        $acc = $avg = null;
+        foreach ($instant as [$t, $right, $ms]) {
+            $timed = $right && $ms !== null && $ms <= 10000;
+            $win[] = [$right, $timed ? $ms : null];
+            $ok += $right ? 1 : 0;
+            if ($timed) {
+                $msSum += $ms;
+                $msN++;
+            }
+            if (count($win) > $n) {
+                [$oRight, $oMs] = array_shift($win);
+                $ok -= $oRight ? 1 : 0;
+                if ($oMs !== null) {
+                    $msSum -= $oMs;
+                    $msN--;
+                }
+            }
+            if (count($win) === $n) {
+                $acc = (int)floor($ok / $n * 100);
+                $avg = $msN ? (int)round($msSum / $msN) : null;
+                $fast = $goal['instant']['ms'] === null || ($avg !== null && $avg <= $goal['instant']['ms']);
+                if ($ts === null && $acc >= $goal['instant']['acc'] && $fast) {
+                    $ts = $t;
+                }
+            }
+        }
+        $out['instant'] = ['answers' => min(count($instant), $n), 'need' => $n, 'acc' => $acc, 'ms' => $avg, 'doneTs' => $ts];
+        $out['done'] = $out['done'] && $ts !== null;
+        $out['doneTs'] = max($out['doneTs'], (int)$ts);
+    }
+    if (!$out['done']) {
+        $out['doneTs'] = null;
+    }
+    return $out;
 }
