@@ -1,4 +1,5 @@
-# Controlla il codice a ogni push e, se è su main, lo copia in produzione con rsync su SSH.
+# Controlla il codice a ogni push e lo copia sul server con rsync su SSH:
+# il ramo main va in produzione, ogni altro ramo nella copia di staging.
 # Segreti da impostare in Settings › Secrets and variables › Actions:
 #   SSH_HOST         nome del server (es. ssh.tuohosting.it)
 #   SSH_PORT         porta SSH (facoltativo, default 22)
@@ -6,10 +7,12 @@
 #   SSH_KEY          chiave privata dedicata al deploy (senza passphrase)
 #   SSH_KNOWN_HOSTS  riga di `ssh-keyscan -p PORTA HOST`, per riconoscere il server
 #   DEPLOY_PATH      cartella dell'app sul server (es. /home/utente/public_html/cw/)
+#   DEPLOY_PATH_STAGING  cartella della copia di staging (database e utenti propri)
 name: Controlli e deploy
 
 on:
   push:
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -35,12 +38,12 @@ jobs:
 
   deploy:
     needs: check
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    environment: production
-    # Un deploy alla volta; uno nuovo aspetta che finisca quello in corso
+    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    # Un deploy alla volta per ambiente; uno nuovo aspetta che finisca quello in corso
     concurrency:
-      group: production
+      group: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v5
@@ -63,13 +66,24 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PORT: ${{ secrets.SSH_PORT }}
           SSH_USER: ${{ secrets.SSH_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PATH: ${{ github.ref == 'refs/heads/main' && secrets.DEPLOY_PATH || secrets.DEPLOY_PATH_STAGING }}
+          STAGING: ${{ github.ref != 'refs/heads/main' && '1' || '' }}
           DRY_RUN: ${{ inputs.prova && '--dry-run' || '' }}
         # config.php e i dati restano quelli del server; i file tolti dal repository
         # non vengono cancellati in produzione (niente --delete)
         run: |
+          if [ -z "$DEPLOY_PATH" ]; then echo "::error::Cartella di destinazione non impostata"; exit 1; fi
+          SSH_CMD="ssh -i ~/.ssh/deploy -p ${SSH_PORT:-22} -o StrictHostKeyChecking=yes"
+          if [ -n "$STAGING" ]; then
+            # Lo staging non deve finire nei motori di ricerca
+            printf '\n<IfModule mod_headers.c>\n  Header always set X-Robots-Tag "noindex, nofollow"\n</IfModule>\n' >> .htaccess
+            # Il config.php del repository si copia solo la prima volta; poi resta quello del server
+            rsync -ptz --itemize-changes $DRY_RUN --ignore-existing --chmod=F644 -e "$SSH_CMD" \
+              --rsync-path="mkdir -p '${DEPLOY_PATH%/}' && rsync" \
+              config.php "$SSH_USER@$SSH_HOST:${DEPLOY_PATH%/}/"
+          fi
           rsync -rlptz --itemize-changes $DRY_RUN --chmod=D755,F644 \
-            -e "ssh -i ~/.ssh/deploy -p ${SSH_PORT:-22} -o StrictHostKeyChecking=yes" \
+            -e "$SSH_CMD" \
             --include='data/' --include='data/.htaccess' --exclude='data/**' \
             --exclude='.git/' --exclude='.github/' --exclude='.gitignore' \
             --exclude='config.php' --exclude='README.md' \

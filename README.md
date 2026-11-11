@@ -85,7 +85,7 @@ Il codice è distribuito con licenza MIT (file `LICENSE`). Come indicato nel fil
 
 ## Deploy automatico
 
-`.github/workflows/deploy.yml` controlla la sintassi di PHP, JavaScript e manifest a ogni push. Se il push è su `main` e i controlli passano, copia l'app sul server con rsync su SSH.
+`.github/workflows/deploy.yml` controlla la sintassi di PHP, JavaScript e manifest a ogni push. Se i controlli passano, copia l'app sul server con rsync su SSH: il ramo `main` va in produzione, ogni altro ramo nella copia di staging (`DEPLOY_PATH_STAGING`). Lo staging ha `config.php`, database e utenti propri, e un header che lo tiene fuori dai motori di ricerca. Gli utenti di prova si creano con `php manage.php add <nome>` nella cartella di staging sul server.
 
 - Non tocca `config.php` né i dati in `data/`: restano quelli del server.
 - Non cancella sul server i file tolti dal repository: vanno rimossi a mano.
