@@ -63,6 +63,14 @@ function cw_migrate(PDO $db, string $driver): void
             sent MEDIUMTEXT NOT NULL, typed MEDIUMTEXT NOT NULL,
             KEY user_ts (user_id, ts),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) $t");
+        $db->exec("CREATE TABLE IF NOT EXISTS instant (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            ts BIGINT NOT NULL,
+            ch VARCHAR(4) NOT NULL, ans VARCHAR(4) NOT NULL,
+            ms INT NULL, voice TINYINT NOT NULL, wpm SMALLINT NOT NULL,
+            KEY user_ts (user_id, ts),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) $t");
         $db->exec("CREATE TABLE IF NOT EXISTS login_attempts (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             ip VARCHAR(45) NOT NULL, username VARCHAR(64) NOT NULL, ts INT NOT NULL,
@@ -87,6 +95,15 @@ function cw_migrate(PDO $db, string $driver): void
         errors INTEGER NOT NULL, total INTEGER NOT NULL,
         sent TEXT NOT NULL, typed TEXT NOT NULL)');
     $db->exec('CREATE INDEX IF NOT EXISTS results_user_ts ON results (user_id, ts)');
+    // Risposte del riconoscimento rapido: una riga per risposta. ms è il tempo dalla fine
+    // del tono, NULL se non confrontabile (risposta a voce o carattere riascoltato)
+    $db->exec('CREATE TABLE IF NOT EXISTS instant (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        ts INTEGER NOT NULL,
+        ch TEXT NOT NULL, ans TEXT NOT NULL,
+        ms INTEGER, voice INTEGER NOT NULL, wpm INTEGER NOT NULL)');
+    $db->exec('CREATE INDEX IF NOT EXISTS instant_user_ts ON instant (user_id, ts)');
     $db->exec('CREATE TABLE IF NOT EXISTS login_attempts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ip TEXT NOT NULL, username TEXT NOT NULL, ts INTEGER NOT NULL)');
@@ -223,6 +240,7 @@ function cw_delete_user(PDO $db, int $userId): void
 {
     $db->beginTransaction();
     $db->prepare('DELETE FROM results WHERE user_id = ?')->execute([$userId]);
+    $db->prepare('DELETE FROM instant WHERE user_id = ?')->execute([$userId]);
     $db->prepare('DELETE FROM settings WHERE user_id = ?')->execute([$userId]);
     $db->prepare('DELETE FROM users WHERE id = ?')->execute([$userId]);
     $db->commit();

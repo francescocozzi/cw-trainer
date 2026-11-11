@@ -27,14 +27,15 @@ function toast(msg) {
 
 /* ---------- Server ---------- */
 let regAllowed = false, regMode = false, saveTimer = null;
-async function api(action, body, params) {
+async function api(action, body, params, opts = {}) {
   let r;
   try {
     r = await fetch(`api.php?action=${encodeURIComponent(action)}${params ? "&" + new URLSearchParams(params) : ""}`, {
       method: body ? "POST" : "GET",
       credentials: "same-origin",
       headers: Object.assign({ "X-Requested-With": "cw" }, body ? { "Content-Type": "application/json" } : {}),
-      body: body ? JSON.stringify(body) : undefined
+      body: body ? JSON.stringify(body) : undefined,
+      keepalive: !!opts.keepalive
     });
   } catch (e) { throw new Error(navigator.onLine ? "Server non raggiungibile" : "Sei offline: serve la connessione per accedere e salvare i risultati"); }
   let data = {};
@@ -133,6 +134,7 @@ function play(text, onEnd, opt = {}) {
   pump();
   osc.onended = () => { clearInterval(me.timer); if (current === me) { current = null; onEnd && onEnd(); } };
   current = me;
+  return me;
 }
 function stop() {
   if (current) { const o = current.osc; clearInterval(current.timer); current = null; o.onended = null; try { o.stop(); } catch (e) {} }
@@ -358,22 +360,26 @@ function renderHist() {
 }
 
 /* ---------- Rapido ---------- */
-let target = null, cOk = 0, cBad = 0, busy = false, charFreq = 600, nextTimer = 0;
+let target = null, cOk = 0, cBad = 0, busy = false, charFreq = 600, nextTimer = 0, toneEnd = 0, replayed = false;
 function renderKeys() {
   $("keys").innerHTML = activeChars().map(c => `<button data-c="${esc(c)}">${esc(c)}</button>`).join("");
 }
-const playTarget = listen => play(target, listen && voiceOn() ? listenAnswer : null, { freq: charFreq });
+function playTarget(listen) {
+  const me = play(target, listen && voiceOn() ? listenAnswer : null, { freq: charFreq });
+  // Il tempo di risposta si misura dalla fine del tono
+  toneEnd = performance.now() + Math.max(0, me.end - ctx.currentTime) * 1000;
+}
 function nextChar() {
   stopListen();
   const set = activeChars();
   if (!set.length) { stopInstant(); $("bigCh").textContent = "—"; return; }
-  target = randChar(set); busy = false; charFreq = pickFreq();
+  target = randChar(set); busy = false; replayed = false; charFreq = pickFreq();
   $("bigCh").textContent = "?"; $("bigCh").className = "big";
   playTarget(true);
 }
 // Lo stesso pulsante avvia e ferma: fermando si interrompono tono, ascolto e carattere successivo
 function stopInstant() {
-  clearTimeout(nextTimer); stopListen(); stop();
+  clearTimeout(nextTimer); stopListen(); stop(); flushInstant();
   target = null; busy = false;
   $("bigCh").textContent = "?"; $("bigCh").className = "big";
   $("keys").querySelectorAll(".ok,.bad").forEach(b => b.classList.remove("ok", "bad"));
@@ -383,11 +389,15 @@ $("instStart").onclick = () => {
   if (target) { stopInstant(); return; }
   cOk = cBad = 0; updCounters(); $("instReplay").disabled = false; $("instStart").textContent = "Ferma"; nextChar();
 };
-$("instReplay").onclick = () => { if (target && !busy) { stopListen(); playTarget(true); } };
+$("instReplay").onclick = () => { if (target && !busy) { stopListen(); replayed = true; playTarget(true); } };
 function updCounters() { $("cOk").textContent = `${cOk} giusti`; $("cBad").textContent = `${cBad} errori`; }
-function answer(c) {
+function answer(c, voice = false) {
   if (!target || busy) return;
   busy = true; stopListen();
+  // Il tempo non è confrontabile se il carattere è stato riascoltato o la risposta è a voce
+  const ms = voice || replayed ? null : Math.max(0, Math.round(performance.now() - toneEnd));
+  instQueue.push({ c: target, a: c, t: Date.now(), ms, v: voice, w: S.wpm });
+  if (instQueue.length >= 20) flushInstant();
   const ok = c === target, b = $("keys").querySelector(`button[data-c="${CSS.escape(c)}"]`);
   if (b) b.classList.add(ok ? "ok" : "bad");
   $("bigCh").textContent = target; $("bigCh").className = "big " + (ok ? "ok" : "bad");
@@ -396,6 +406,22 @@ function answer(c) {
   nextTimer = setTimeout(() => { if (b) b.classList.remove("ok", "bad"); nextChar(); }, ok ? 450 : 1300);
 }
 $("keys").addEventListener("click", e => { const b = e.target.closest("button"); if (b) answer(b.dataset.c); });
+
+// Le risposte vanno al server a blocchi: ogni 20, quando si ferma, si cambia vista o si chiude l'app
+let instQueue = [], instSending = false, instRetry = 0;
+function flushInstant(leaving = false) {
+  if (!instQueue.length || instSending) return;
+  const items = instQueue.splice(0, 200);
+  instSending = true;
+  api("instant", { items }, undefined, { keepalive: leaving })
+    .catch(e => {
+      if (e.status && e.status !== 429 && e.status < 500) return; // dati rifiutati: inutile riprovare
+      instQueue.unshift(...items); instQueue = instQueue.slice(-1000);
+      clearTimeout(instRetry); instRetry = setTimeout(flushInstant, 5000);
+    })
+    .finally(() => { instSending = false; });
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushInstant(true); });
 
 /* ---------- Risposta a voce (solo Rapido) ---------- */
 // Alfabeto NATO, alfabeto italiano e cifre in italiano e in inglese, con le varianti che i
@@ -444,7 +470,7 @@ function listenAnswer() {
     noSpeech = 0;
     if (!c) { rec = null; setHeard(`Sentito «${alts[0]}»: non lo riconosco, ripeti`, false); setTimeout(() => { if (!rec) listenAnswer(); }, 900); return; }
     rec = null; setHeard(`Sentito: ${alts[0]}`, false);
-    answer(c);
+    answer(c, true);
   };
   r.onerror = e => {
     done = true; rec = null;
@@ -534,7 +560,7 @@ function showView(v) {
   document.querySelectorAll("nav button").forEach(x => x.toggleAttribute("aria-current", x.dataset.view === v));
   document.querySelectorAll("nav button[aria-current]").forEach(x => x.setAttribute("aria-current", "page"));
   VIEWS.forEach(id => { $("v-" + id).hidden = id !== v; });
-  if (v !== "instant") stopListen();
+  if (v !== "instant") { stopListen(); flushInstant(); }
   if (v === "stats") loadStats();
   window.scrollTo(0, 0);
 }
@@ -542,7 +568,9 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => showView(
 
 /* ---------- Statistiche ---------- */
 const VIEWS = ["koch", "instant", "stats", "settings"];
-let statsData = null, showAllChars = false, practiceChars = [];
+let statsData = null, showAllChars = false, practiceChars = [], showAllIChars = false, iPracticeChars = [];
+let stMode = lsGet("cw-stmode") === "instant" ? "instant" : "groups";
+const secs = ms => (ms / 1000).toFixed(2).replace(".", ",") + " s";
 const dayLabel = d => d.slice(8, 10) + "/" + d.slice(5, 7);
 
 function lineChart(el, labels, series, o) {
@@ -594,6 +622,9 @@ $("stPeriod").addEventListener("change", loadStats);
 function renderStats() {
   const d = statsData; if (!d) return;
   const s = d.summary;
+  document.querySelectorAll("#stMode button").forEach(b => b.setAttribute("aria-pressed", b.dataset.m === stMode));
+  $("stG").hidden = stMode !== "groups"; $("stI").hidden = stMode !== "instant";
+  if (stMode === "instant") { renderInstantStats(d.instant, s.streak); return; }
   $("stTiles").innerHTML = [
     [s.sessions, s.sessions === 1 ? "sessione" : "sessioni"],
     [s.sessions ? s.acc + "%" : "—", "precisione"],
@@ -637,15 +668,59 @@ function renderStats() {
     return `<details class="sess"><summary><span>${date}, ${esc(set)}, ${h.w}/${h.e} WPM</span><b style="color:var(${h.a >= 90 ? "--ok" : "--err"})">${h.a}%</b></summary>${body}</details>`;
   }).join("") : '<p class="muted">Nessuna sessione ancora.</p>';
 }
+function renderInstantStats(d, streak) {
+  const s = d.summary;
+  $("stTiles").innerHTML = [
+    [s.answers.toLocaleString("it-IT"), s.answers === 1 ? "risposta" : "risposte"],
+    [s.answers ? s.acc + "%" : "—", "precisione"],
+    [s.ms != null ? secs(s.ms) : "—", "tempo medio"],
+    [streak, streak === 1 ? "giorno di fila" : "giorni di fila"]
+  ].map(([v, l]) => `<div class="tile"><b>${v}</b><span>${l}</span></div>`).join("");
+
+  const accs = d.days.map(x => x.acc);
+  lineChart($("chIAcc"), d.days.map(x => dayLabel(x.day)), [{ values: accs, color: "var(--accent)", name: "Precisione" }],
+    { min: accs.length ? Math.max(0, Math.floor((Math.min(...accs) - 5) / 10) * 10) : 0, max: 100, ref: 90, unit: "%", label: "Precisione giornaliera nel riconoscimento rapido" });
+  const timed = d.days.filter(x => x.ms != null);
+  lineChart($("chIMs"), timed.map(x => dayLabel(x.day)), [{ values: timed.map(x => x.ms), color: "var(--accent)", name: "Tempo" }],
+    { min: 0, unit: " ms", label: "Tempo medio di risposta giornaliero in millisecondi" });
+
+  // Prima i meno precisi, a parità di precisione i più lenti
+  const ch = d.chars.filter(c => c.n >= 5)
+    .map(c => Object.assign({}, c, { acc: Math.round((1 - c.err / c.n) * 100) }))
+    .sort((a, b) => a.acc - b.acc || (b.ms ?? 0) - (a.ms ?? 0));
+  const list = showAllIChars ? ch : ch.slice(0, 10);
+  $("stIChars").innerHTML = ch.length
+    ? list.map(c => `<div class="crow"><span class="c">${esc(c.c)}</span><span class="b"><i style="width:${c.acc}%;background:var(${c.acc >= 90 ? "--ok" : "--err"})"></i></span><span class="v">${c.acc}%${c.ms != null ? " · " + secs(c.ms) : ""}</span></div>`).join("")
+    : '<p class="muted">Ancora pochi dati: fai qualche esercizio rapido in più.</p>';
+  $("stIMore").hidden = ch.length <= 10;
+  $("stIMore").textContent = showAllIChars ? "Mostra meno" : `Mostra tutti (${ch.length})`;
+  // Da ripassare: quelli sotto il 90%; se sono meno di due, si aggiungono i più lenti fino a cinque
+  const weak = ch.filter(c => c.acc < 90);
+  const slow = ch.filter(c => c.acc >= 90 && c.ms != null).sort((a, b) => b.ms - a.ms);
+  iPracticeChars = (weak.length >= 2 ? weak : weak.concat(slow).slice(0, 5)).map(c => c.c);
+  $("stIPractice").hidden = iPracticeChars.length < 2;
+  $("stIPractice").textContent = `Esercitati su ${iPracticeChars.join(" ")}`;
+
+  $("stIConf").innerHTML = d.confusions.length
+    ? d.confusions.map(c => `<li><span><span class="mono">${esc(c.s)}</span> riconosciuto come <span class="mono">${esc(c.t)}</span></span><b>${c.n} ${c.n === 1 ? "volta" : "volte"}</b></li>`).join("")
+    : '<li class="muted">Nessuna confusione nel periodo.</li>';
+}
+$("stMode").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  stMode = b.dataset.m; lsSet("cw-stmode", stMode); renderStats();
+});
 $("stMore").onclick = () => { showAllChars = !showAllChars; renderStats(); };
-$("stPractice").onclick = () => {
+$("stIMore").onclick = () => { showAllIChars = !showAllIChars; renderStats(); };
+function practiceOn(chars, view) {
   const name = "Da ripassare";
   S.sets = S.sets.filter(x => x.name !== name);
-  S.sets.push({ name, chars: practiceChars.join("") });
+  S.sets.push({ name, chars: chars.join("") });
   S.mode = "set:" + name; saveS();
-  renderSet(); newExercise(); showView("koch");
-  toast(`Modo «${name}»: ${practiceChars.join(" ")}`);
-};
+  renderSet(); newExercise(); showView(view);
+  toast(`Modo «${name}»: ${chars.join(" ")}`);
+}
+$("stPractice").onclick = () => practiceOn(practiceChars, "koch");
+$("stIPractice").onclick = () => practiceOn(iPracticeChars, "instant");
 
 /* ---------- Account ---------- */
 function showLogin(on) {

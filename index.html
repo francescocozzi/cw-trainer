@@ -312,8 +312,35 @@ body:has(textarea:focus,input:not([type=range]):not([type=checkbox]):focus) nav{
           <option value="7">7 giorni</option><option value="30" selected>30 giorni</option><option value="90">90 giorni</option><option value="0">Sempre</option>
         </select>
       </div>
+      <div class="seg" id="stMode" role="group" aria-label="Tipo di esercizio" style="grid-template-columns:1fr 1fr">
+        <button data-m="groups" aria-pressed="true">Gruppi</button><button data-m="instant" aria-pressed="false">Rapido</button>
+      </div>
       <div class="tiles" id="stTiles"></div>
     </div>
+    <div id="stI" hidden>
+    <div class="panel">
+      <h2>Precisione</h2>
+      <p class="muted" style="margin:0">Risposte giuste di ogni giorno. La linea tratteggiata è il 90%.</p>
+      <div class="chart" id="chIAcc"></div>
+    </div>
+    <div class="panel">
+      <h2>Tempo di risposta</h2>
+      <p class="muted" style="margin:0">Media di ogni giorno, dalla fine del tono al tocco, solo per le risposte giuste. Se scende, il riconoscimento sta diventando automatico. Le risposte a voce e i caratteri riascoltati non contano.</p>
+      <div class="chart" id="chIMs"></div>
+    </div>
+    <div class="panel">
+      <h2>Caratteri</h2>
+      <p class="muted" style="margin:0 0 6px">Dal più difficile al più facile, tra quelli ascoltati almeno 5 volte: prima i meno precisi, poi i più lenti.</p>
+      <div id="stIChars"></div>
+      <button class="lnk" id="stIMore" style="margin-top:8px" hidden></button>
+      <button class="btn primary" id="stIPractice" style="width:100%;margin-top:12px" hidden></button>
+    </div>
+    <div class="panel">
+      <h2>Confusioni frequenti</h2>
+      <ul class="hist" id="stIConf"></ul>
+    </div>
+    </div>
+    <div id="stG">
     <div class="panel">
       <h2>Precisione</h2>
       <p class="muted" style="margin:0">Media di ogni giorno. La linea tratteggiata è il 90%.</p>
@@ -339,6 +366,7 @@ body:has(textarea:focus,input:not([type=range]):not([type=checkbox]):focus) nav{
       <h2>Ultime sessioni</h2>
       <p class="muted" style="margin:0">Tocca una sessione per rivedere cosa è stato trasmesso e cosa hai scritto.</p>
       <div id="stSessions"></div>
+    </div>
     </div>
   </section>
 
