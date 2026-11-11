@@ -139,12 +139,20 @@ function play(text, onEnd, opt = {}) {
 function stop() {
   if (current) { const o = current.osc; clearInterval(current.timer); current = null; o.onended = null; try { o.stop(); } catch (e) {} }
 }
+// Schermo acceso durante gli esercizi. Il sistema rilascia il blocco quando l'app va in
+// secondo piano: al ritorno lo si richiede, se l'esercizio è ancora in corso.
+let wantAwake = false;
 async function keepAwake(on) {
+  wantAwake = on;
   try {
-    if (on && "wakeLock" in navigator && !wakeLock) wakeLock = await navigator.wakeLock.request("screen");
-    if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+    if (on && "wakeLock" in navigator && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    }
+    if (!on && wakeLock) { const w = wakeLock; wakeLock = null; await w.release(); }
   } catch (e) {}
 }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && wantAwake) keepAwake(true); });
 
 /* ---------- Esercizio ---------- */
 const randChar = set => set[Math.floor(Math.random() * set.length)];
@@ -379,7 +387,7 @@ function nextChar() {
 }
 // Lo stesso pulsante avvia e ferma: fermando si interrompono tono, ascolto e carattere successivo
 function stopInstant() {
-  clearTimeout(nextTimer); stopListen(); stop(); flushInstant();
+  clearTimeout(nextTimer); stopListen(); stop(); flushInstant(); keepAwake(false);
   target = null; busy = false;
   $("bigCh").textContent = "?"; $("bigCh").className = "big";
   $("keys").querySelectorAll(".ok,.bad").forEach(b => b.classList.remove("ok", "bad"));
@@ -387,7 +395,7 @@ function stopInstant() {
 }
 $("instStart").onclick = () => {
   if (target) { stopInstant(); return; }
-  cOk = cBad = 0; updCounters(); $("instReplay").disabled = false; $("instStart").textContent = "Ferma"; nextChar();
+  cOk = cBad = 0; updCounters(); $("instReplay").disabled = false; $("instStart").textContent = "Ferma"; keepAwake(true); nextChar();
 };
 $("instReplay").onclick = () => { if (target && !busy) { stopListen(); replayed = true; playTarget(true); } };
 function updCounters() { $("cOk").textContent = `${cOk} giusti`; $("cBad").textContent = `${cBad} errori`; }
