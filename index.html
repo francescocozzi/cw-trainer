@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CW Trainer">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#eef1f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
+<title>CW Trainer</title>
+<script src="theme.js"></script>
+<link rel="preload" href="fonts/barlow-condensed-bold.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face{font-family:"Barlow Condensed";font-weight:500;font-display:swap;src:url(fonts/barlow-condensed-medium.woff2) format("woff2")}
+@font-face{font-family:"Barlow Condensed";font-weight:600;font-display:swap;src:url(fonts/barlow-condensed-semibold.woff2) format("woff2")}
+@font-face{font-family:"Barlow Condensed";font-weight:700;font-display:swap;src:url(fonts/barlow-condensed-bold.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-weight:100 800;font-display:swap;src:url(fonts/jetbrains-mono.woff2) format("woff2")}
+/* --fill è il colore di riempimento (pulsanti, barre), --accent quello per il testo.
+   Chiaro e scuro usano il blu ARI (#34579D); sul fondo scuro serve una tinta più chiara
+   dello stesso blu, perché quello pieno non si stacca abbastanza. */
+:root{
+  --bg:#eef1f5; --surface:#ffffff; --sunk:#e3e8ee; --text:#142033; --muted:#4f5c72;
+  --line:#c3ccd8; --fill:#34579d; --fill-ink:#ffffff; --accent:#34579d;
+  --ok:#17803f; --ok-ink:#ffffff; --err:#b8321f; --err-ink:#ffffff;
+  --ok-bg:#dcf2e4; --err-bg:#f8e0dc; --knob:#ffffff;
+  --display:"Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono:"JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme]){
+    --bg:#0b1220; --surface:#142036; --sunk:#080d18; --text:#e8eef8; --muted:#a3b1c9;
+    --line:#2a3a5c; --fill:#7fa3e6; --fill-ink:#08142e; --accent:#9dbbf0;
+    --ok:#4cc982; --ok-ink:#04210f; --err:#ff7a66; --err-ink:#2b0700;
+    --ok-bg:#10301d; --err-bg:#3a1611; --knob:#ffffff; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0b1220; --surface:#142036; --sunk:#080d18; --text:#e8eef8; --muted:#a3b1c9;
+  --line:#2a3a5c; --fill:#7fa3e6; --fill-ink:#08142e; --accent:#9dbbf0;
+  --ok:#4cc982; --ok-ink:#04210f; --err:#ff7a66; --err-ink:#2b0700;
+  --ok-bg:#10301d; --err-bg:#3a1611; --knob:#ffffff; color-scheme:dark;
+}
+/* Notte: solo rossi e arancio su nero, per non perdere l'adattamento al buio */
+:root[data-theme="night"]{
+  --bg:#000000; --surface:#0e0302; --sunk:#000000; --text:#ff6a52; --muted:#d4503b;
+  --line:#4a130c; --fill:#d9452c; --fill-ink:#000000; --accent:#ff8a5c;
+  --ok:#ffa040; --ok-ink:#000000; --err:#ff3a24; --err-ink:#000000;
+  --ok-bg:#2a1600; --err-bg:#330804; --knob:#ff6a52; color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px);-webkit-text-size-adjust:100%}
+body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:var(--body);font-size:17px;line-height:1.45;-webkit-tap-highlight-color:transparent;overscroll-behavior-y:none}
+::selection{background:var(--fill);color:var(--fill-ink)}
+main{max-width:560px;margin:0 auto;padding:12px max(16px,env(safe-area-inset-right,0px)) calc(96px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.top{display:flex;align-items:center;gap:10px}
+.top h1{flex:1}
+/* Di notte il logo blu lascia il posto alla versione rossa */
+.logo{height:48px;width:auto;flex:0 0 auto;display:block}
+.logo-n,:root[data-theme="night"] .logo-d{display:none}
+:root[data-theme="night"] .logo-n{display:block}
+.icon-btn{width:44px;height:44px;flex:0 0 44px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--muted);border:1px solid var(--line);background:var(--surface)}
+.icon-btn svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.icon-btn[aria-pressed="true"]{color:var(--fill-ink);background:var(--fill);border-color:transparent}
+.tag{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;white-space:nowrap}
+h1,h2{font-family:var(--display);font-weight:700;margin:0;letter-spacing:.01em}
+h1{font-size:30px}
+h2{font-size:22px;margin-bottom:4px}
+.muted{color:var(--muted);font-size:15px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:14px}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;touch-action:manipulation;transition:transform .08s,filter .08s}
+button:active:not(:disabled){transform:scale(.97);filter:brightness(1.12)}
+button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){button{transition:none}button:active:not(:disabled){transform:none}}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:52px;border-radius:12px;padding:0 18px;font-weight:600;background:var(--sunk);border:1px solid var(--line)}
+.btn.primary{background:var(--fill);color:var(--fill-ink);border-color:transparent;font-size:19px}
+.btn:disabled{opacity:.4}
+.row{display:flex;gap:10px;align-items:center}
+.row > *{flex:1}
+[hidden]{display:none !important}
+
+/* Character set */
+.sethead{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.count{font-family:var(--display);font-size:52px;line-height:1;font-weight:700;color:var(--accent)}
+.charset{font-family:var(--mono);font-size:16px;letter-spacing:.12em;color:var(--muted);word-break:break-all;margin-top:6px;min-height:1.4em}
+.quick{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.quick:empty{display:none}
+.quick button{min-height:44px;padding:0 16px;border-radius:20px;background:var(--sunk);border:1px solid var(--line);font-size:15px;font-weight:600}
+.quick button[aria-pressed="true"]{background:var(--fill);color:var(--fill-ink);border-color:transparent}
+.quick [data-del]{display:inline-block;padding:0 2px 0 8px;font-size:18px;opacity:.7}
+.picker{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:6px;margin-top:12px}
+.picker button{height:48px;border-radius:10px;background:var(--sunk);border:1px solid var(--line);font-family:var(--mono);font-size:20px;font-weight:700;color:var(--muted)}
+.picker button[aria-pressed="true"]{background:var(--fill);color:var(--fill-ink);border-color:transparent}
+.sub{font-family:var(--display);font-size:17px;color:var(--muted);margin-top:16px}
+
+/* Esercizio */
+.fld{display:flex;flex-direction:column;gap:4px;font-size:14px;color:var(--muted);font-weight:600}
+select{font:inherit;font-size:17px;color:var(--text);background:var(--sunk);border:1px solid var(--line);border-radius:10px;height:46px;padding:0 10px;width:100%}
+.params{margin:12px 0 0;font-size:15px;color:var(--muted)}
+.params b{color:var(--text)}
+/* Area di tocco più grande del testo, senza spostare l'impaginazione */
+.lnk{color:var(--accent);font-weight:600;text-decoration:underline;text-underline-offset:3px;padding:10px 4px;margin:-10px -4px;font-size:15px}
+/* Il player resta in vista mentre si scrive e la tastiera occupa metà schermo */
+.player{display:flex;align-items:center;gap:14px;position:sticky;top:env(safe-area-inset-top,0px);z-index:2;background:var(--surface);margin:-16px -16px 0;padding:16px 16px 8px;border-radius:14px 14px 0 0}
+.pp{width:72px;height:72px;flex:0 0 72px;border-radius:50%;background:var(--fill);color:var(--fill-ink);display:flex;align-items:center;justify-content:center}
+.pp svg{width:30px;height:30px;fill:currentColor}
+.prog{flex:1}
+.bar{height:10px;border-radius:5px;background:var(--sunk);border:1px solid var(--line);overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--fill)}
+.time{display:flex;justify-content:space-between;font-family:var(--mono);font-size:15px;color:var(--muted);margin-top:6px;font-variant-numeric:tabular-nums}
+
+.status{font-family:var(--display);font-size:19px;color:var(--muted);text-align:center;min-height:28px;margin:10px 0 6px}
+.status.live{color:var(--accent)}
+.status.live::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--fill);margin-right:8px;vertical-align:1px;animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:.2}}
+@media (prefers-reduced-motion:reduce){.status.live::before{animation:none}}
+
+textarea{width:100%;min-height:150px;resize:vertical;border-radius:12px;border:1px solid var(--line);background:var(--sunk);color:var(--text);padding:12px;font-family:var(--mono);font-size:22px;letter-spacing:.1em;line-height:1.6;text-transform:uppercase;caret-color:var(--accent);margin-top:4px}
+textarea::placeholder{color:var(--muted);opacity:1;font-size:16px;letter-spacing:0;text-transform:none}
+
+.score{font-family:var(--display);font-size:56px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.score.good{color:var(--ok)}.score.bad{color:var(--err)}
+.groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-top:12px}
+.g{border-radius:10px;padding:6px 8px;font-family:var(--mono);font-size:16px;background:var(--ok-bg)}
+.g.bad{background:var(--err-bg)}
+.g .s{display:block;font-weight:700}
+.g .t{display:block;color:var(--muted);min-height:1.4em}
+.g .t b{color:var(--err)}
+
+.hist{list-style:none;margin:0;padding:0}
+.hist li{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:15px}
+.hist li:last-child{border-bottom:0}
+
+/* Instant recognition */
+.big{font-family:var(--mono);font-size:72px;font-weight:700;text-align:center;min-height:96px;line-height:96px}
+.big.ok{color:var(--ok)}.big.bad{color:var(--err)}
+.heard{text-align:center;font-size:15px;color:var(--muted);min-height:1.5em;margin-bottom:6px}
+.heard.on::before{content:"";display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--err);margin-right:7px;vertical-align:1px}
+@media (prefers-reduced-motion:no-preference){.heard.on::before{animation:rec 1s ease-in-out infinite alternate}}
+@keyframes rec{to{opacity:.25}}
+.keys{display:grid;grid-template-columns:repeat(auto-fill,minmax(58px,1fr));gap:8px;margin-top:12px}
+.keys button{height:58px;border-radius:12px;background:var(--sunk);border:1px solid var(--line);font-family:var(--mono);font-size:24px;font-weight:700}
+.keys button.ok{background:var(--ok);color:var(--ok-ink);border-color:transparent}
+.keys button.bad{background:var(--err);color:var(--err-ink);border-color:transparent}
+.counters{display:flex;justify-content:space-around;font-family:var(--display);font-size:20px;margin-top:8px;font-variant-numeric:tabular-nums}
+
+/* Settings */
+.set{padding:12px 0;border-bottom:1px solid var(--line)}
+.set:last-child{border-bottom:0}
+.set > label:first-child{display:flex;justify-content:space-between;font-weight:600}
+.set output{font-family:var(--mono);color:var(--accent);font-weight:700;font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;margin-top:10px;accent-color:var(--fill);height:36px}
+input[type=range]:disabled{opacity:.35}
+.hint{font-size:14px;color:var(--muted);margin-top:4px}
+.sw{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;font-size:16px;cursor:pointer}
+.sw input{appearance:none;-webkit-appearance:none;flex:0 0 51px;width:51px;height:31px;border-radius:16px;background:var(--line);position:relative;margin:0;transition:background .15s}
+.sw input::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:var(--knob);box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .15s}
+.sw input:checked{background:var(--fill)}
+.sw input:checked::after{transform:translateX(20px)}
+@media (prefers-reduced-motion:reduce){.sw input,.sw input::after{transition:none}}
+
+.fld input{font:inherit;font-size:17px;color:var(--text);background:var(--sunk);border:1px solid var(--line);border-radius:10px;height:46px;padding:0 12px;width:100%;font-weight:400}
+#toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--text);color:var(--surface);padding:10px 16px;border-radius:10px;font-size:15px;z-index:10;max-width:90vw;text-align:center}
+/* Statistiche */
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.tile{background:var(--sunk);border-radius:12px;padding:10px 12px}
+.tile b{display:block;font-family:var(--display);font-size:32px;line-height:1.1}
+.tile span{font-size:14px;color:var(--muted)}
+.chart{margin-top:8px}
+.chart svg{width:100%;height:auto;display:block;overflow:visible}
+.chart text{font-family:var(--body);font-size:10px;fill:var(--muted)}
+.legend{display:flex;gap:16px;font-size:14px;color:var(--muted);margin-top:6px}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.crow{display:grid;grid-template-columns:34px 1fr 96px;align-items:center;gap:10px;padding:5px 0}
+.crow .c{font-family:var(--mono);font-size:20px;font-weight:700;text-align:center}
+.crow .b{height:10px;border-radius:5px;background:var(--sunk);overflow:hidden}
+.crow .b i{display:block;height:100%}
+.crow .v{font-size:14px;color:var(--muted);text-align:right}
+.mono{font-family:var(--mono);font-weight:700;font-size:18px}
+details.sess{border-bottom:1px solid var(--line);padding:10px 0}
+details.sess:last-child{border-bottom:0}
+details.sess summary{cursor:pointer;display:flex;justify-content:space-between;gap:10px;font-size:15px;list-style:none}
+details.sess summary::-webkit-details-marker{display:none}
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:0 env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);display:flex;justify-content:center;z-index:5}
+nav .wrap{display:flex;max-width:560px;width:100%}
+nav button{flex:1;min-width:0;height:64px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-family:var(--display);font-size:15px;font-weight:600;color:var(--muted)}
+nav button:active:not(:disabled){transform:none}
+nav svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+nav button[aria-current="page"]{color:var(--accent);box-shadow:inset 0 3px 0 var(--fill)}
+/* Con la tastiera aperta la barra in basso ruba spazio al testo (Android la alza sopra la tastiera) */
+body:has(textarea:focus,input:not([type=range]):not([type=checkbox]):focus) nav{display:none}
+.seg{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:4px;margin-top:10px;background:var(--sunk);border:1px solid var(--line);border-radius:12px}
+.seg button{min-height:44px;border-radius:9px;font-weight:600;font-size:16px;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--fill);color:var(--fill-ink)}</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <img class="logo logo-d" src="ari-logo-144.png" width="63" height="144" alt="ARI">
+    <img class="logo logo-n" src="ari-logo-notte-144.png" width="63" height="144" alt="ARI">
+    <h1>CW Trainer</h1>
+    <span class="tag" id="speedTag"></span>
+    <button class="icon-btn" id="nightBtn" aria-pressed="false" aria-label="Modalità notte"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></button>
+  </header>
+
+  <!-- ACCESSO -->
+  <section id="v-login" hidden>
+    <div class="panel">
+      <h2 id="loginTitle">Accedi</h2>
+      <form id="loginForm">
+        <label class="fld">Nome utente<input id="lUser" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required></label>
+        <label class="fld" style="margin-top:10px">Password<input id="lPass" name="password" type="password" autocomplete="current-password" required></label>
+        <div class="status" id="lMsg" style="color:var(--err)"></div>
+        <button class="btn primary" style="width:100%" id="lBtn">Accedi</button>
+      </form>
+      <button class="lnk" id="lSwitch" style="margin-top:14px" hidden></button>
+    </div>
+  </section>
+
+  <!-- ESERCIZIO -->
+  <section id="v-koch" hidden>
+    <h2 style="margin-top:14px;font-size:26px">Gruppi codice <span id="durTitle" style="color:var(--muted)"></span></h2>
+    <div class="panel" style="margin-top:8px">
+      <div class="row">
+        <label class="fld">Modo<select id="mode"></select></label>
+        <label class="fld" style="flex:0 0 100px">Durata<select id="dur"></select></label>
+      </div>
+      <p class="params" id="params"></p>
+      <div class="charset" id="charset"></div>
+    </div>
+
+    <div class="panel">
+      <div class="player">
+        <button class="pp" id="ppBtn" aria-label="Play"></button>
+        <div class="prog">
+          <div class="bar"><i id="bar"></i></div>
+          <div class="time"><span id="tNow">0:00</span><span id="tTot">0:00</span></div>
+        </div>
+      </div>
+      <div class="status" id="status"></div>
+      <textarea id="answer" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Scrivi qui, gruppi separati da spazio"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" id="checkBtn" disabled>Controlla risultato</button>
+        <button class="btn" id="newBtn" style="flex:0 0 auto">Nuovo</button>
+      </div>
+      <p class="muted" style="margin:8px 0 0;text-align:center">Maiuscolo o minuscolo, è indifferente.</p>
+    </div>
+
+    <div class="panel" id="results" hidden>
+      <div class="row" style="align-items:flex-end">
+        <div style="flex:0 0 auto"><div class="score" id="score"></div></div>
+        <div class="muted" id="scoreNote" style="text-align:right"></div>
+      </div>
+      <div class="groups" id="groups"></div>
+    </div>
+
+    <div class="panel" id="histPanel" hidden>
+      <h2>Ultime sessioni</h2>
+      <ul class="hist" id="hist"></ul>
+    </div>
+  </section>
+
+  <!-- RAPIDO -->
+  <section id="v-instant" hidden>
+    <div class="panel">
+      <h2>Riconoscimento rapido</h2>
+      <p class="muted" style="margin:0">Ascolta un carattere e tocca quello giusto. Usa i caratteri del modo scelto nell’esercizio, alla velocità carattere impostata.</p>
+      <div class="big" id="bigCh">?</div>
+      <div class="heard" id="heard" aria-live="polite"></div>
+      <div class="row">
+        <button class="btn primary" id="instStart">Inizia</button>
+        <button class="btn" id="instReplay" disabled>Ripeti</button>
+      </div>
+      <div id="voiceBox" hidden>
+        <label class="sw" for="voiceSw"><span>Rispondi a voce</span><input type="checkbox" id="voiceSw"></label>
+        <p class="hint">Dopo ogni carattere il microfono resta in ascolto: di’ la parola dell’alfabeto NATO o di quello italiano, per esempio Bravo o Bologna per la B, e la cifra in italiano o in inglese. Per i segni usa i pulsanti. Il riconoscimento lo esegue il browser sui server di Apple o Google. Con gli altoparlanti il microfono sente anche il tono: meglio una cuffia.</p>
+      </div>
+      <div class="counters"><span id="cOk" style="color:var(--ok)">0 giusti</span><span id="cBad" style="color:var(--err)">0 errori</span></div>
+      <div class="keys" id="keys"></div>
+    </div>
+  </section>
+
+  <!-- STATISTICHE -->
+  <section id="v-stats" hidden>
+    <div class="panel">
+      <div class="row">
+        <h2 style="margin:0">Statistiche</h2>
+        <select id="stPeriod" style="flex:0 0 140px" aria-label="Periodo">
+          <option value="7">7 giorni</option><option value="30" selected>30 giorni</option><option value="90">90 giorni</option><option value="0">Sempre</option>
+        </select>
+      </div>
+      <div class="tiles" id="stTiles"></div>
+    </div>
+    <div class="panel">
+      <h2>Precisione</h2>
+      <p class="muted" style="margin:0">Media di ogni giorno. La linea tratteggiata è il 90%.</p>
+      <div class="chart" id="chAcc"></div>
+    </div>
+    <div class="panel">
+      <h2>Velocità</h2>
+      <p class="muted" style="margin:0">Velocità più alte usate in ogni giorno.</p>
+      <div class="chart" id="chSpeed"></div>
+    </div>
+    <div class="panel">
+      <h2>Caratteri</h2>
+      <p class="muted" style="margin:0 0 6px">Dal più difficile al più facile, tra quelli ascoltati almeno 5 volte.</p>
+      <div id="stChars"></div>
+      <button class="lnk" id="stMore" style="margin-top:8px" hidden></button>
+      <button class="btn primary" id="stPractice" style="width:100%;margin-top:12px" hidden></button>
+    </div>
+    <div class="panel">
+      <h2>Confusioni frequenti</h2>
+      <ul class="hist" id="stConf"></ul>
+    </div>
+    <div class="panel">
+      <h2>Ultime sessioni</h2>
+      <p class="muted" style="margin:0">Tocca una sessione per rivedere cosa è stato trasmesso e cosa hai scritto.</p>
+      <div id="stSessions"></div>
+    </div>
+  </section>
+
+  <!-- IMPOSTAZIONI -->
+  <section id="v-settings" hidden>
+    <div class="panel">
+      <h2>Aspetto</h2>
+      <div class="seg" id="themeSeg" role="group" aria-label="Tema">
+        <button data-t="auto">Auto</button><button data-t="light">Chiaro</button><button data-t="dark">Scuro</button><button data-t="night">Notte</button>
+      </div>
+      <p class="hint">«Auto» segue il telefono. «Notte» usa solo rosso e arancio su nero, per leggere al buio senza abbagliarti: abbassa anche la luminosità dello schermo. Il tema vale per questo dispositivo.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Velocità</h2>
+      <div class="set">
+        <label for="sWpm">Velocità carattere <output id="oWpm"></output></label>
+        <input type="range" id="sWpm" min="5" max="60" step="1">
+      </div>
+      <div class="set">
+        <label for="sEff">Velocità effettiva <output id="oEff"></output></label>
+        <input type="range" id="sEff" min="2" max="60" step="1">
+        <div class="hint">Allunga le pause tra caratteri e parole. Uguale alla velocità carattere per disattivarla.</div>
+      </div>
+      <div class="set">
+        <label for="sExtra">Extra word spacing <output id="oExtra"></output></label>
+        <input type="range" id="sExtra" min="0" max="10" step="1">
+        <div class="hint">Spazi di parola aggiuntivi tra un gruppo e l’altro.</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Tono</h2>
+      <div class="set">
+        <label for="sFreq">Frequenza <output id="oFreq"></output></label>
+        <input type="range" id="sFreq" min="300" max="1200" step="10">
+        <label class="sw" for="sRandTone"><span>Casuale (500–900 Hz)</span><input type="checkbox" id="sRandTone"></label>
+      </div>
+      <div class="set">
+        <label for="sVol">Volume <output id="oVol"></output></label>
+        <input type="range" id="sVol" min="5" max="100" step="5">
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Sessione</h2>
+      <div class="set">
+        <label class="sw" for="sPre" style="margin-top:0;font-weight:600"><span>Trasmissione prefisso/suffisso «VVV = / AR»</span><input type="checkbox" id="sPre"></label>
+      </div>
+      <div class="set">
+        <label for="sDelay">Ritardo di partenza <output id="oDelay"></output></label>
+        <input type="range" id="sDelay" min="0" max="10" step="1">
+      </div>
+      <div class="set">
+        <label for="sGlen">Lunghezza del gruppo <output id="oGlen"></output></label>
+        <input type="range" id="sGlen" min="1" max="10" step="1">
+        <label class="sw" for="sRandLen"><span>Casuale (2–7)</span><input type="checkbox" id="sRandLen"></label>
+      </div>
+    </div>
+
+    <div class="panel" id="charsPanel">
+      <h2>Caratteri custom</h2>
+      <p class="muted" style="margin:0">Scegli i caratteri da usare negli esercizi. I pulsanti sotto aggiungono o tolgono un intero gruppo.</p>
+      <div class="quick">
+        <button data-q="letters">Lettere</button><button data-q="numbers">Cifre</button><button data-q="koch">Caratteri Koch</button><button data-q="extras">Extra</button><button data-q="none">Nessuno</button>
+      </div>
+      <div class="picker" id="picker"></div>
+      <div class="sub">Extra</div>
+      <div class="picker" id="pickerX"></div>
+      <div class="row" style="margin-top:14px">
+        <button class="btn" id="hearSet">Ascolta selezionati</button>
+        <button class="btn" id="saveSet">Salva set</button>
+      </div>
+      <div class="quick" id="saved"></div>
+      <p class="hint">I set salvati compaiono anche nel menu Modo dell’esercizio.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Account</h2>
+      <p class="muted" style="margin-top:0">Connesso come <b id="whoami"></b>. Impostazioni e risultati sono salvati sul server.</p>
+      <form id="pwForm" style="padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--line)">
+        <label class="fld">Password attuale<input id="pwOld" type="password" autocomplete="current-password" required></label>
+        <label class="fld" style="margin-top:10px">Nuova password<input id="pwNew" type="password" autocomplete="new-password" minlength="8" required></label>
+        <button class="btn" style="width:100%;margin-top:10px">Cambia password</button>
+      </form>
+      <div class="row">
+        <button class="btn" id="clearHist">Cancella lo storico</button>
+        <button class="btn" id="logoutBtn">Esci</button>
+      </div>
+      <button class="lnk" id="delAccount" style="margin-top:16px;color:var(--err)">Elimina account e tutti i dati</button>
+    </div>
+  </section>
+</main>
+
+<nav id="nav" hidden><div class="wrap">
+  <button data-view="koch" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="7" rx="1.5"/><rect x="17" y="14" width="4" height="7" rx="1.5"/></svg>Esercizio</button>
+  <button data-view="instant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Rapido</button>
+  <button data-view="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg>Statistiche</button>
+  <button data-view="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>Impostazioni</button>
+</div></nav>
+
+<div id="toast" hidden role="status"></div>
+<script src="app.js"></script>
+</body>
+</html>

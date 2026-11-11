@@ -1,0 +1,9 @@
+# macOS
+.DS_Store
+
+# Dati del server: database, sessioni. Si tiene solo la protezione della cartella.
+data/*
+!data/.htaccess
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

@@ -1,0 +1,33 @@
+# ---- Accesso ai file interni ----
+<FilesMatch "^(config|lib|manage)\.php$|\.(sqlite|sqlite-wal|sqlite-shm|md|txt)$|^\.">
+  Require all denied
+</FilesMatch>
+<FilesMatch "^OFL-.*\.txt$">
+  Require all granted
+</FilesMatch>
+Options -Indexes
+
+# ---- Sempre HTTPS ----
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTPS} !=on
+  RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+</IfModule>
+
+# ---- Header di sicurezza ----
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  # same-origin: il Referer va solo al nostro sito (serve alla protezione anti-hotlink
+  # dell'hosting per le immagini), mai a siti esterni
+  Header always set Referrer-Policy "same-origin"
+  Header always set X-Frame-Options "DENY"
+  Header always set Permissions-Policy "camera=(), microphone=(self), geolocation=(), payment=()"
+  Header always set Strict-Transport-Security "max-age=31536000"
+  <FilesMatch "\.html$|^$">
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+  </FilesMatch>
+  <FilesMatch "\.(html|js)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+</IfModule>

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" fill="#34579d"/>
+  <g transform="translate(256 256) scale(1.06) translate(-256 -282)">
+  <!-- base -->
+  <rect x="88" y="338" width="336" height="40" rx="12" fill="#ffffff"/>
+  <rect x="104" y="378" width="40" height="14" rx="4" fill="#c9d8f3"/>
+  <rect x="368" y="378" width="40" height="14" rx="4" fill="#c9d8f3"/>
+  <!-- contatto sotto la leva -->
+  <rect x="226" y="296" width="28" height="42" rx="4" fill="#c9d8f3"/>
+  <!-- supporto del perno -->
+  <path d="M330 338 L346 250 L398 250 L414 338 Z" fill="#ffffff"/>
+  <!-- leva -->
+  <rect x="150" y="256" width="250" height="24" rx="12" fill="#ffffff"/>
+  <!-- perno -->
+  <circle cx="372" cy="268" r="26" fill="#ffffff"/>
+  <circle cx="372" cy="268" r="10" fill="#34579d"/>
+  <!-- molla di ritorno -->
+  <path d="M300 280 l10 8 l-20 8 l20 8 l-20 8 l20 8 l-10 8" fill="none" stroke="#c9d8f3" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- manopola -->
+  <rect x="164" y="214" width="22" height="46" fill="#ffffff"/>
+  <ellipse cx="175" cy="214" rx="66" ry="20" fill="#ffffff"/>
+  <ellipse cx="175" cy="196" rx="56" ry="24" fill="#ffffff"/>
+  <ellipse cx="175" cy="214" rx="66" ry="6" fill="#c9d8f3"/>
+  </g>
+</svg>
