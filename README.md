@@ -78,3 +78,7 @@ La versione della cache è l’impronta dei file statici, calcolata da `sw.php`:
 ## Risposta a voce (Rapido)
 
 Nel riconoscimento rapido si può rispondere a voce con l’alfabeto NATO o con quello italiano, e con le cifre in italiano o in inglese. L’elenco delle parole accettate è `SPOKEN` in `app.js`. Il riconoscimento lo esegue il browser (Safari sui server Apple, Chrome su quelli Google); Firefox non lo supporta e l’interruttore non compare. Il microfono va permesso nel `.htaccess` con `microphone=(self)` nella `Permissions-Policy`.
+
+## Licenza
+
+Il codice è distribuito con licenza MIT (file `LICENSE`). Sono esclusi il logo ARI (`ari-logo*.png`), che è un marchio dell’Associazione Radioamatori Italiani usato con il permesso della sezione di Bari e non va riutilizzato, e i font, che hanno la propria licenza SIL OFL 1.1 nella cartella `fonts`. Chi adatta l’app per un’altra sezione deve togliere i file del logo e i riferimenti in `index.html` e `sw.php`.
