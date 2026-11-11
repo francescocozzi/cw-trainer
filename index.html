@@ -124,6 +124,18 @@ select{font:inherit;font-size:17px;color:var(--text);background:var(--sunk);bord
 @media (prefers-reduced-motion:reduce){.status.live::before{animation:none}}
 
 textarea{width:100%;min-height:150px;resize:vertical;border-radius:12px;border:1px solid var(--line);background:var(--sunk);color:var(--text);padding:12px;font-family:var(--mono);font-size:22px;letter-spacing:.1em;line-height:1.6;text-transform:uppercase;caret-color:var(--accent);margin-top:4px}
+/* Trascrizione a blocchi: il campo di testo resta, invisibile sopra la griglia, e riceve la tastiera */
+.typing{position:relative}
+.blocks{display:none}
+.typing.grid .blocks{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(var(--n,5) * 1.25em + 22px),1fr));gap:8px;min-height:150px;align-content:start;padding:10px;border-radius:12px;border:1px solid var(--line);background:var(--sunk);font-family:var(--mono);font-size:20px}
+.typing.grid:focus-within .blocks{border-color:var(--accent)}
+.typing.grid textarea{position:absolute;inset:0;width:100%;height:100%;min-height:0;margin:0;opacity:0;resize:none;caret-color:transparent}
+.blk{display:flex;justify-content:center;gap:.25em;padding:8px 4px;border-radius:9px;border:1px solid var(--line);background:var(--surface);font-weight:700;line-height:1.2}
+.blk i{display:inline-block;width:.75em;height:1.2em;border-bottom:2px solid var(--line)}
+.typing.grid:focus-within .blk.cur{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.blocks .muted{grid-column:1/-1;margin:0;font-size:16px;font-family:var(--body)}
+.sw:has(input:disabled){color:var(--muted);cursor:default}
+.sw input:disabled{opacity:.5}
 textarea::placeholder{color:var(--muted);opacity:1;font-size:16px;letter-spacing:0;text-transform:none}
 
 .score{font-family:var(--display);font-size:56px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
@@ -246,7 +258,10 @@ body:has(textarea:focus,input:not([type=range]):not([type=checkbox]):focus) nav{
         </div>
       </div>
       <div class="status" id="status"></div>
-      <textarea id="answer" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Scrivi qui, gruppi separati da spazio"></textarea>
+      <div class="typing" id="typing">
+        <div class="blocks" id="blocks" aria-hidden="true"></div>
+        <textarea id="answer" aria-label="Trascrizione" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Scrivi qui, gruppi separati da spazio"></textarea>
+      </div>
       <div class="row" style="margin-top:10px">
         <button class="btn primary" id="checkBtn" disabled>Controlla risultato</button>
         <button class="btn" id="newBtn" style="flex:0 0 auto">Nuovo</button>
@@ -383,8 +398,8 @@ body:has(textarea:focus,input:not([type=range]):not([type=checkbox]):focus) nav{
         <label class="sw" for="sRandLen"><span>Casuale (2–7)</span><input type="checkbox" id="sRandLen"></label>
       </div>
       <div class="set">
-        <label class="sw" for="sNoSpace" style="margin-top:0;font-weight:600"><span>Trascrizione continua, senza spazi</span><input type="checkbox" id="sNoSpace"></label>
-        <p class="hint">Scrivi i caratteri uno dopo l’altro senza pensare ai gruppi: alla correzione l’app li divide da sola come sono stati trasmessi.</p>
+        <label class="sw" for="sNoSpace" style="margin-top:0;font-weight:600"><span>Trascrizione continua a blocchi</span><input type="checkbox" id="sNoSpace" aria-describedby="noSpaceHint"></label>
+        <p class="hint" id="noSpaceHint"></p>
       </div>
     </div>
 

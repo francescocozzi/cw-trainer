@@ -231,7 +231,7 @@ function halt() {
 }
 function newExercise() {
   halt(); sess = "idle"; sent = [];
-  $("answer").value = ""; $("results").hidden = true; $("checkBtn").disabled = true;
+  $("answer").value = ""; $("results").hidden = true; $("checkBtn").disabled = true; renderBlocks();
   $("bar").style.width = "0"; $("tNow").textContent = "0:00"; $("tTot").textContent = fmt(S.mins * 60);
   setStatus(activeChars().length ? "Premi Play e trascrivi i gruppi" : "Nessun carattere custom selezionato: tocca «Cambia»", false);
 }
@@ -240,7 +240,7 @@ $("ppBtn").onclick = () => {
   if (sess === "playing") { ensureCtx().suspend(); sess = "paused"; setPP(false); setStatus("In pausa", false); keepAwake(false); return; }
   if (sess === "paused") { ensureCtx().resume(); sess = "playing"; setPP(true); keepAwake(true); tick(); return; }
   if (!activeChars().length) { setStatus("Nessun carattere custom selezionato: tocca «Cambia»", false); return; }
-  if (sess === "idle") { sent = genGroups(); $("answer").value = ""; $("results").hidden = true; }
+  if (sess === "idle") { sent = genGroups(); $("answer").value = ""; $("results").hidden = true; renderBlocks(); }
   sess = "playing"; setPP(true); $("checkBtn").disabled = false;
   setStatus(S.delay ? `Inizio tra ${S.delay} s` : `In trasmissione: ${sent.length} gruppi`, !S.delay);
   play(sessionText(), () => {
@@ -288,6 +288,36 @@ function splitStream(text, sentG) {
   }
   return out.map(g => g || MISSING);
 }
+/* ---------- Trascrizione a blocchi ---------- */
+// Il campo di testo resta quello vero (tastiera, accessibilità), invisibile sopra la griglia.
+// Si scrive solo in coda: niente spazi e cursore sempre alla fine.
+const gridMode = () => S.noSpace && !S.randLen;
+function renderBlocks() {
+  const on = gridMode();
+  $("typing").classList.toggle("grid", on);
+  if (!on) return;
+  const ta = $("answer"), v = [...ta.value];
+  if (!sent.length && !v.length) { $("blocks").innerHTML = '<p class="muted">I blocchi compaiono quando parte la trasmissione.</p>'; return; }
+  const n = S.glen, cur = Math.floor(v.length / n), count = Math.max(sent.length, cur + 1);
+  $("blocks").style.setProperty("--n", n);
+  let html = "";
+  for (let i = 0; i < count; i++) {
+    const chars = v.slice(i * n, i * n + n);
+    html += `<div class="blk${i === cur ? " cur" : ""}">${chars.map(esc).join("")}${"<i></i>".repeat(n - chars.length)}</div>`;
+  }
+  $("blocks").innerHTML = html;
+  const c = $("blocks").querySelector(".cur");
+  if (c && document.activeElement === ta) c.scrollIntoView({ block: "nearest" });
+}
+function toEnd() { const ta = $("answer"); if (gridMode()) ta.setSelectionRange(ta.value.length, ta.value.length); }
+$("answer").addEventListener("input", () => {
+  if (!gridMode()) return;
+  const ta = $("answer"), clean = ta.value.replace(/\s+/g, "").toUpperCase();
+  if (clean !== ta.value) ta.value = clean;
+  toEnd(); renderBlocks();
+});
+["focus", "click", "keyup", "select"].forEach(ev => $("answer").addEventListener(ev, toEnd));
+
 // iOS sostituisce virgolette e trattini con quelli tipografici: li riportiamo a quelli semplici
 const normalize = s => s.toUpperCase().replace(/[“”„«»]/g, "\"").replace(/[‘’‚]/g, "'").replace(/[–—]/g, "-");
 
@@ -296,7 +326,7 @@ $("checkBtn").onclick = () => {
   halt(); sess = "idle";
   setStatus("Esercizio controllato. Premi Play per uno nuovo.", false);
   const raw = normalize($("answer").value);
-  const typed = S.noSpace ? splitStream(raw, sent) : raw.trim().split(/\s+/).filter(Boolean);
+  const typed = gridMode() ? splitStream(raw, sent) : raw.trim().split(/\s+/).filter(Boolean);
   let errs = 0, total = 0, html = "";
   const n = Math.max(sent.length, typed.length);
   for (let i = 0; i < n; i++) {
@@ -455,10 +485,16 @@ const fields = {
 const toggles = { randTone: "sRandTone", pre: "sPre", randLen: "sRandLen", noSpace: "sNoSpace" };
 function syncSettings() {
   if (S.eff > S.wpm) S.eff = S.wpm;
+  // I blocchi hanno senso solo con gruppi di lunghezza fissa
+  if (S.randLen) S.noSpace = false;
   for (const k in fields) { const [i, o, f] = fields[k]; $(i).value = S[k]; $(o).textContent = f(S[k]); }
   for (const k in toggles) $(toggles[k]).checked = !!S[k];
   $("sEff").max = S.wpm;
-  $("answer").placeholder = S.noSpace ? "Scrivi qui di seguito, senza spazi" : "Scrivi qui, gruppi separati da spazio";
+  $("sNoSpace").disabled = S.randLen;
+  $("noSpaceHint").textContent = S.randLen
+    ? "Non disponibile con la lunghezza del gruppo casuale."
+    : "Scrivi i caratteri uno dopo l’altro, senza spazi: si dispongono da soli in blocchi della lunghezza del gruppo.";
+  renderBlocks();
   $("sFreq").disabled = S.randTone; $("oFreq").textContent = S.randTone ? "casuale" : S.freq + " Hz";
   $("sGlen").disabled = S.randLen; $("oGlen").textContent = S.randLen ? "2–7" : fields.glen[2](S.glen);
 }
