@@ -6,6 +6,10 @@
   Require all granted
 </FilesMatch>
 Options -Indexes
+# Cartelle nascoste (.git e simili): FilesMatch vede solo il nome del file, non la cartella
+<IfModule mod_alias.c>
+  RedirectMatch 404 "/\.(?!well-known/)"
+</IfModule>
 
 # ---- Sempre HTTPS ----
 <IfModule mod_rewrite.c>
