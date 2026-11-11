@@ -15,7 +15,7 @@ const GROUPS = {
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
 
-const DEFAULTS = { chars: "KMURES", sets: [], wpm: 20, eff: 12, extra: 0, freq: 600, randTone: false, vol: 60, pre: true, delay: 3, glen: 5, randLen: false, mins: 5, mode: "custom" };
+const DEFAULTS = { chars: "KMURES", sets: [], wpm: 20, eff: 12, extra: 0, freq: 600, randTone: false, vol: 60, pre: true, delay: 3, glen: 5, randLen: false, mins: 5, mode: "custom", noSpace: false };
 const S = JSON.parse(JSON.stringify(DEFAULTS));
 let history = [];
 const $ = id => document.getElementById(id);
@@ -231,7 +231,7 @@ function halt() {
 }
 function newExercise() {
   halt(); sess = "idle"; sent = [];
-  $("answer").value = ""; $("results").hidden = true; $("checkBtn").disabled = true;
+  $("answer").value = ""; $("results").hidden = true; $("checkBtn").disabled = true; renderBlocks();
   $("bar").style.width = "0"; $("tNow").textContent = "0:00"; $("tTot").textContent = fmt(S.mins * 60);
   setStatus(activeChars().length ? "Premi Play e trascrivi i gruppi" : "Nessun carattere custom selezionato: tocca «Cambia»", false);
 }
@@ -240,7 +240,7 @@ $("ppBtn").onclick = () => {
   if (sess === "playing") { ensureCtx().suspend(); sess = "paused"; setPP(false); setStatus("In pausa", false); keepAwake(false); return; }
   if (sess === "paused") { ensureCtx().resume(); sess = "playing"; setPP(true); keepAwake(true); tick(); return; }
   if (!activeChars().length) { setStatus("Nessun carattere custom selezionato: tocca «Cambia»", false); return; }
-  if (sess === "idle") { sent = genGroups(); $("answer").value = ""; $("results").hidden = true; }
+  if (sess === "idle") { sent = genGroups(); $("answer").value = ""; $("results").hidden = true; renderBlocks(); }
   sess = "playing"; setPP(true); $("checkBtn").disabled = false;
   setStatus(S.delay ? `Inizio tra ${S.delay} s` : `In trasmissione: ${sent.length} gruppi`, !S.delay);
   play(sessionText(), () => {
@@ -261,6 +261,63 @@ function lev(a, b) {
     d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
   return d[m][n];
 }
+// Gruppo saltato per intero nella trascrizione continua: tiene il posto, così i gruppi
+// successivi restano allineati anche nello storico e nelle statistiche
+const MISSING = "_";
+const typedOf = g => g === MISSING ? "" : g || "";
+// Trascrizione continua: allinea carattere per carattere tutto il testo scritto con quello
+// trasmesso e lo ridivide nei gruppi trasmessi. Un carattere perso o in più resta un errore
+// solo nel suo gruppo, invece di spostare tutti quelli dopo.
+function splitStream(text, sentG) {
+  const a = [], grp = [];
+  sentG.forEach((g, k) => { for (const c of g) { a.push(c); grp.push(k); } });
+  const b = [...text.replace(/\s+/g, "")];
+  const m = a.length, n = b.length, W = n + 1, d = new Int32Array((m + 1) * W);
+  for (let i = 0; i <= m; i++) d[i * W] = i;
+  for (let j = 0; j <= n; j++) d[j] = j;
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
+    d[i * W + j] = Math.min(d[(i - 1) * W + j] + 1, d[i * W + j - 1] + 1, d[(i - 1) * W + j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  // Dalla fine all'inizio: ogni carattere scritto va nel gruppo del carattere trasmesso a cui
+  // corrisponde; uno in più va nel gruppo del carattere trasmesso che lo precede
+  const out = sentG.map(() => "");
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && d[i * W + j] === d[(i - 1) * W + j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)) { out[grp[--i]] = b[--j] + out[grp[i]]; }
+    else if (i > 0 && d[i * W + j] === d[(i - 1) * W + j] + 1) i--;
+    else { j--; out[i > 0 ? grp[i - 1] : 0] = b[j] + out[i > 0 ? grp[i - 1] : 0]; }
+  }
+  return out.map(g => g || MISSING);
+}
+/* ---------- Trascrizione a blocchi ---------- */
+// Il campo di testo resta quello vero (tastiera, accessibilità), invisibile sopra la griglia.
+// Si scrive solo in coda: niente spazi e cursore sempre alla fine.
+const gridMode = () => S.noSpace && !S.randLen;
+function renderBlocks() {
+  const on = gridMode();
+  $("typing").classList.toggle("grid", on);
+  if (!on) return;
+  const ta = $("answer"), v = [...ta.value];
+  if (!sent.length && !v.length) { $("blocks").innerHTML = '<p class="muted">I blocchi compaiono quando parte la trasmissione.</p>'; return; }
+  const n = S.glen, cur = Math.floor(v.length / n), count = Math.max(sent.length, cur + 1);
+  $("blocks").style.setProperty("--n", n);
+  let html = "";
+  for (let i = 0; i < count; i++) {
+    const chars = v.slice(i * n, i * n + n);
+    html += `<div class="blk${i === cur ? " cur" : ""}">${chars.map(esc).join("")}${"<i></i>".repeat(n - chars.length)}</div>`;
+  }
+  $("blocks").innerHTML = html;
+  const c = $("blocks").querySelector(".cur");
+  if (c && document.activeElement === ta) c.scrollIntoView({ block: "nearest" });
+}
+function toEnd() { const ta = $("answer"); if (gridMode()) ta.setSelectionRange(ta.value.length, ta.value.length); }
+$("answer").addEventListener("input", () => {
+  if (!gridMode()) return;
+  const ta = $("answer"), clean = ta.value.replace(/\s+/g, "").toUpperCase();
+  if (clean !== ta.value) ta.value = clean;
+  toEnd(); renderBlocks();
+});
+["focus", "click", "keyup", "select"].forEach(ev => $("answer").addEventListener(ev, toEnd));
+
 // iOS sostituisce virgolette e trattini con quelli tipografici: li riportiamo a quelli semplici
 const normalize = s => s.toUpperCase().replace(/[“”„«»]/g, "\"").replace(/[‘’‚]/g, "'").replace(/[–—]/g, "-");
 
@@ -268,11 +325,12 @@ $("checkBtn").onclick = () => {
   if (!sent.length) return;
   halt(); sess = "idle";
   setStatus("Esercizio controllato. Premi Play per uno nuovo.", false);
-  const typed = normalize($("answer").value).trim().split(/\s+/).filter(Boolean);
+  const raw = normalize($("answer").value);
+  const typed = gridMode() ? splitStream(raw, sent) : raw.trim().split(/\s+/).filter(Boolean);
   let errs = 0, total = 0, html = "";
   const n = Math.max(sent.length, typed.length);
   for (let i = 0; i < n; i++) {
-    const s = sent[i] || "", t = typed[i] || "";
+    const s = sent[i] || "", t = typedOf(typed[i]);
     const e = lev(s, t); errs += e; total += [...s].length;
     const sc = [...s];
     const tHtml = [...t].map((c, k) => c === sc[k] ? esc(c) : `<b>${esc(c)}</b>`).join("") || "—";
@@ -424,12 +482,19 @@ const fields = {
   vol: ["sVol", "oVol", v => v + "%"], delay: ["sDelay", "oDelay", v => v + " s"],
   glen: ["sGlen", "oGlen", v => v + (v == 1 ? " carattere" : " caratteri")]
 };
-const toggles = { randTone: "sRandTone", pre: "sPre", randLen: "sRandLen" };
+const toggles = { randTone: "sRandTone", pre: "sPre", randLen: "sRandLen", noSpace: "sNoSpace" };
 function syncSettings() {
   if (S.eff > S.wpm) S.eff = S.wpm;
+  // I blocchi hanno senso solo con gruppi di lunghezza fissa
+  if (S.randLen) S.noSpace = false;
   for (const k in fields) { const [i, o, f] = fields[k]; $(i).value = S[k]; $(o).textContent = f(S[k]); }
   for (const k in toggles) $(toggles[k]).checked = !!S[k];
   $("sEff").max = S.wpm;
+  $("sNoSpace").disabled = S.randLen;
+  $("noSpaceHint").textContent = S.randLen
+    ? "Non disponibile con la lunghezza del gruppo casuale."
+    : "Scrivi i caratteri uno dopo l’altro, senza spazi: si dispongono da soli in blocchi della lunghezza del gruppo.";
+  renderBlocks();
   $("sFreq").disabled = S.randTone; $("oFreq").textContent = S.randTone ? "casuale" : S.freq + " Hz";
   $("sGlen").disabled = S.randLen; $("oGlen").textContent = S.randLen ? "2–7" : fields.glen[2](S.glen);
 }
@@ -509,7 +574,7 @@ function lineChart(el, labels, series, o) {
 function compareHTML(sentG, typedG) {
   let html = "";
   for (let i = 0; i < Math.max(sentG.length, typedG.length); i++) {
-    const s = sentG[i] || "", t = typedG[i] || "", sc = [...s];
+    const s = sentG[i] || "", t = typedOf(typedG[i]), sc = [...s];
     const bad = lev(s, t) > 0;
     const tHtml = [...t].map((c, k) => c === sc[k] ? esc(c) : `<b>${esc(c)}</b>`).join("") || "—";
     html += `<div class="g${bad ? " bad" : ""}"><span class="s">${esc(s) || "(in più)"}</span><span class="t">${tHtml}</span></div>`;
