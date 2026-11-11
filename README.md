@@ -82,3 +82,12 @@ Nel riconoscimento rapido si può rispondere a voce con l’alfabeto NATO o con 
 ## Licenza
 
 Il codice è distribuito con licenza MIT (file `LICENSE`). Come indicato nel file `NOTICE`, sono esclusi il logo ARI (`ari-logo*.png`), che è un marchio dell’Associazione Radioamatori Italiani usato con il permesso della sezione di Bari e non va riutilizzato, e i font, che hanno la propria licenza SIL OFL 1.1 nella cartella `fonts`. Chi adatta l’app per un’altra sezione deve togliere i file del logo e i riferimenti in `index.html` e `sw.php`.
+
+## Deploy automatico
+
+`.github/workflows/deploy.yml` controlla la sintassi di PHP, JavaScript e manifest a ogni push. Se il push è su `main` e i controlli passano, copia l'app sul server con rsync su SSH.
+
+- Non tocca `config.php` né i dati in `data/`: restano quelli del server.
+- Non cancella sul server i file tolti dal repository: vanno rimossi a mano.
+- Imposta i permessi a 644 per i file e 755 per le cartelle.
+- Finché i segreti `SSH_*` e `DEPLOY_PATH` non sono impostati, il deploy viene saltato. L'elenco dei segreti è in cima al file del workflow.

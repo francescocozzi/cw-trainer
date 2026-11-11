@@ -1,0 +1,70 @@
+# Controlla il codice a ogni push e, se è su main, lo copia in produzione con rsync su SSH.
+# Segreti da impostare in Settings › Secrets and variables › Actions:
+#   SSH_HOST         nome del server (es. ssh.tuohosting.it)
+#   SSH_PORT         porta SSH (facoltativo, default 22)
+#   SSH_USER         utente SSH
+#   SSH_KEY          chiave privata dedicata al deploy (senza passphrase)
+#   SSH_KNOWN_HOSTS  riga di `ssh-keyscan -p PORTA HOST`, per riconoscere il server
+#   DEPLOY_PATH      cartella dell'app sul server (es. /home/utente/public_html/cw/)
+name: Controlli e deploy
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sintassi PHP
+        run: for f in *.php; do php -l "$f"; done
+      - name: Sintassi JavaScript
+        run: for f in *.js; do node --check "$f"; done
+      - name: Manifest JSON valido
+        run: node -e 'JSON.parse(require("fs").readFileSync("manifest.webmanifest", "utf8"))'
+
+  deploy:
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    # Un deploy alla volta; uno nuovo aspetta che finisca quello in corso
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Chiave SSH
+        id: ssh
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$SSH_KEY" ]; then
+            echo "::notice::Segreti di deploy non impostati: deploy saltato."
+            echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Copia sul server
+        if: steps.ssh.outputs.skip != '1'
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        # config.php e i dati restano quelli del server; i file tolti dal repository
+        # non vengono cancellati in produzione (niente --delete)
+        run: |
+          rsync -rlptvz --chmod=D755,F644 \
+            -e "ssh -i ~/.ssh/deploy -p ${SSH_PORT:-22} -o StrictHostKeyChecking=yes" \
+            --include='data/' --include='data/.htaccess' --exclude='data/**' \
+            --exclude='.git/' --exclude='.github/' --exclude='.gitignore' \
+            --exclude='config.php' --exclude='README.md' \
+            ./ "$SSH_USER@$SSH_HOST:${DEPLOY_PATH%/}/"
