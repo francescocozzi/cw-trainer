@@ -103,6 +103,8 @@ function cw_migrate(PDO $db, string $driver): void
             FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE) $t");
         cw_add_column($db, $driver, 'results', 'assignment_id', 'INT UNSIGNED NULL');
         cw_add_column($db, $driver, 'instant', 'assignment_id', 'INT UNSIGNED NULL');
+        cw_add_column($db, $driver, 'assignments', 'goal', 'TEXT NULL');
+        cw_add_column($db, $driver, 'assignments', 'due', 'VARCHAR(10) NULL');
         return;
     }
     $db->exec('CREATE TABLE IF NOT EXISTS users (
@@ -162,6 +164,9 @@ function cw_migrate(PDO $db, string $driver): void
     $db->exec('CREATE INDEX IF NOT EXISTS assignments_class ON assignments (class_id)');
     cw_add_column($db, $driver, 'results', 'assignment_id', 'INTEGER');
     cw_add_column($db, $driver, 'instant', 'assignment_id', 'INTEGER');
+    // Obiettivo (JSON) e scadenza (AAAA-MM-GG) degli esercizi assegnati, entrambi facoltativi
+    cw_add_column($db, $driver, 'assignments', 'goal', 'TEXT');
+    cw_add_column($db, $driver, 'assignments', 'due', 'TEXT');
 }
 
 /** Aggiunge una colonna a una tabella esistente, se manca (i database già installati). */
@@ -364,4 +369,98 @@ function cw_clean_assignment($in): array
         'chars' => $s['chars'], 'wpm' => $s['wpm'], 'eff' => $s['eff'], 'extra' => $s['extra'],
         'glen' => $s['glen'], 'randLen' => $s['randLen'], 'mins' => $s['mins'], 'pre' => $s['pre'],
     ];
+}
+
+/**
+ * Obiettivo di un esercizio assegnato, facoltativo per ciascun tipo:
+ * gruppi = N sessioni con precisione almeno P%;
+ * rapido = le ultime N risposte con almeno P% giuste e, se indicato, tempo medio sotto ms.
+ */
+function cw_clean_goal($in): ?array
+{
+    $in = is_array($in) ? $in : [];
+    $g = is_array($in['groups'] ?? null) ? $in['groups'] : null;
+    $i = is_array($in['instant'] ?? null) ? $in['instant'] : null;
+    $goal = [
+        'groups' => $g ? ['n' => cw_clean_int($g['n'] ?? null, 1, 50, 3), 'acc' => cw_clean_int($g['acc'] ?? null, 50, 100, 90)] : null,
+        'instant' => $i ? [
+            'n' => cw_clean_int($i['n'] ?? null, 10, 500, 50),
+            'acc' => cw_clean_int($i['acc'] ?? null, 50, 100, 95),
+            'ms' => isset($i['ms']) && is_numeric($i['ms']) ? cw_clean_int($i['ms'], 200, 5000, 1000) : null,
+        ] : null,
+    ];
+    return $goal['groups'] || $goal['instant'] ? $goal : null;
+}
+
+function cw_clean_due($v): ?string
+{
+    if (!is_string($v) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $v, $m) || !checkdate((int)$m[2], (int)$m[3], (int)$m[1])) {
+        return null;
+    }
+    return $v;
+}
+
+/**
+ * A che punto è un allievo rispetto all'obiettivo.
+ * $groups: [[ts, precisione], ...] e $instant: [[ts, giusta, ms], ...], in ordine di tempo.
+ * doneTs è il momento in cui l'obiettivo è stato raggiunto la prima volta.
+ */
+function cw_goal_status(?array $goal, array $groups, array $instant): ?array
+{
+    if (!$goal) {
+        return null;
+    }
+    $out = ['done' => true, 'doneTs' => 0];
+    if ($goal['groups']) {
+        $need = $goal['groups']['n'];
+        $have = 0;
+        $ts = null;
+        foreach ($groups as [$t, $acc]) {
+            if ($acc >= $goal['groups']['acc'] && ++$have === $need) {
+                $ts = $t;
+            }
+        }
+        $out['groups'] = ['have' => min($have, $need), 'need' => $need, 'doneTs' => $ts];
+        $out['done'] = $out['done'] && $ts !== null;
+        $out['doneTs'] = max($out['doneTs'], (int)$ts);
+    }
+    if ($goal['instant']) {
+        $n = $goal['instant']['n'];
+        $win = [];
+        $ok = $msSum = $msN = 0;
+        $ts = null;
+        $acc = $avg = null;
+        foreach ($instant as [$t, $right, $ms]) {
+            $timed = $right && $ms !== null && $ms <= 10000;
+            $win[] = [$right, $timed ? $ms : null];
+            $ok += $right ? 1 : 0;
+            if ($timed) {
+                $msSum += $ms;
+                $msN++;
+            }
+            if (count($win) > $n) {
+                [$oRight, $oMs] = array_shift($win);
+                $ok -= $oRight ? 1 : 0;
+                if ($oMs !== null) {
+                    $msSum -= $oMs;
+                    $msN--;
+                }
+            }
+            if (count($win) === $n) {
+                $acc = (int)floor($ok / $n * 100);
+                $avg = $msN ? (int)round($msSum / $msN) : null;
+                $fast = $goal['instant']['ms'] === null || ($avg !== null && $avg <= $goal['instant']['ms']);
+                if ($ts === null && $acc >= $goal['instant']['acc'] && $fast) {
+                    $ts = $t;
+                }
+            }
+        }
+        $out['instant'] = ['answers' => min(count($instant), $n), 'need' => $n, 'acc' => $acc, 'ms' => $avg, 'doneTs' => $ts];
+        $out['done'] = $out['done'] && $ts !== null;
+        $out['doneTs'] = max($out['doneTs'], (int)$ts);
+    }
+    if (!$out['done']) {
+        $out['doneTs'] = null;
+    }
+    return $out;
 }

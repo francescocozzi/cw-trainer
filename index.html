@@ -141,6 +141,15 @@ textarea{width:100%;min-height:150px;resize:vertical;border-radius:12px;border:1
 .code-row span{display:block;font-size:14px}
 .code-row b{font-size:26px;letter-spacing:.12em;color:var(--accent)}
 .row > input{flex:1;min-width:0}
+.goal{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-top:8px;font-size:16px}
+.goal label{display:flex;align-items:center;gap:6px;font-weight:600}
+.goal input[type=checkbox]{width:22px;height:22px;margin:0;accent-color:var(--fill)}
+.goal input[type=number],.goal input[type=date]{font:inherit;font-size:16px;color:var(--text);background:var(--sunk);border:1px solid var(--line);border-radius:8px;height:40px;padding:0 8px;font-variant-numeric:tabular-nums}
+.goal input[type=number]{width:3.8em}
+.goal.in{padding-left:30px;margin-top:4px}
+.goal input:disabled{opacity:.45}
+.gs{font-size:15px;margin-top:2px}
+.gs.ok{color:var(--ok)}.gs.bad{color:var(--err)}
 .prog-list{margin-top:6px}
 .hist.prog-list li{display:block}
 .prog-list .st{display:flex;gap:8px;font-size:15px;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -405,14 +414,32 @@ body:has(textarea:focus,input:not([type=range]):not([type=checkbox]):focus) nav{
       <ul class="hist" id="clAssigns"></ul>
       <div class="sub">Nuovo esercizio</div>
       <p class="hint" id="clFrom"></p>
-      <form class="row" id="clAssignForm">
-        <input id="clTitle" maxlength="60" placeholder="Titolo, es. Lezione 3: K M U R" aria-label="Titolo dell’esercizio">
-        <button class="btn primary" style="flex:0 0 auto">Assegna</button>
+      <form id="clAssignForm">
+        <div class="sub" style="margin-top:6px">Obiettivo, facoltativo</div>
+        <div class="goal"><label><input type="checkbox" id="gG"> Gruppi</label></div>
+        <div class="goal in">
+          <input type="number" id="gGn" value="3" min="1" max="50" aria-label="Numero di sessioni"> sessioni sopra il
+          <input type="number" id="gGacc" value="90" min="50" max="100" aria-label="Precisione minima delle sessioni"> %
+        </div>
+        <div class="goal"><label><input type="checkbox" id="gI"> Rapido</label></div>
+        <div class="goal in">
+          ultime <input type="number" id="gIn" value="50" min="10" max="500" aria-label="Numero di risposte"> risposte al
+          <input type="number" id="gIacc" value="95" min="50" max="100" aria-label="Precisione minima delle risposte"> %
+        </div>
+        <div class="goal in">
+          tempo medio sotto <input type="number" id="gIms" min="0.2" max="5" step="0.1" placeholder="—" aria-label="Tempo medio massimo in secondi, facoltativo"> s
+        </div>
+        <div class="goal" style="margin-top:14px"><label for="gDue">Scadenza, facoltativa</label><input type="date" id="gDue"></div>
+        <div class="row" style="margin-top:12px">
+          <input id="clTitle" maxlength="60" placeholder="Titolo, es. Lezione 3: K M U R" aria-label="Titolo dell’esercizio">
+          <button class="btn primary" style="flex:0 0 auto">Assegna</button>
+        </div>
       </form>
     </div>
     <div class="panel" id="clProgPanel">
       <h2>Progressi</h2>
       <select id="clProgPick" aria-label="Esercizio"></select>
+      <p class="hint" id="clProgGoal"></p>
       <ul class="hist prog-list" id="clProg"></ul>
       <div class="sub">Caratteri più sbagliati dalla classe</div>
       <div id="clWeak"></div>

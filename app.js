@@ -193,7 +193,8 @@ function renderSet() {
   $("charset").textContent = set.length ? alpha(set).join(" ") : "Nessun carattere custom selezionato: tocca «Cambia»";
   const tone = S.randTone ? "casuale" : S.freq + " Hz";
   $("params").innerHTML = a
-    ? `Esercizio di <b>${esc(a.cls.tutor)}</b>: velocità carattere <b>${x.wpm} WPM</b>, effettiva <b>${x.eff} WPM</b>, gruppi di <b>${x.randLen ? "2–7" : x.glen}</b>. Tono <b>${tone}</b> e ritardo <b>${S.delay} s</b> sono tuoi. <button class="lnk" id="chg">Cambia</button>`
+    ? `Esercizio di <b>${esc(a.cls.tutor)}</b>: velocità carattere <b>${x.wpm} WPM</b>, effettiva <b>${x.eff} WPM</b>, gruppi di <b>${x.randLen ? "2–7" : x.glen}</b>. Tono <b>${tone}</b> e ritardo <b>${S.delay} s</b> sono tuoi. <button class="lnk" id="chg">Cambia</button>` +
+      (a.goal || a.due ? `<span class="gs" style="display:block;margin-top:6px">${esc([goalText(a.goal), (goalState(a.goal, a.status, a.due) || {}).text].filter(Boolean).join(". "))}</span>` : "")
     : `Velocità carattere <b>${S.wpm} WPM</b>, effettiva <b>${S.eff} WPM</b>, tono <b>${tone}</b>, ritardo <b>${S.delay} s</b>. <button class="lnk" id="chg">Cambia</button>`;
   const btn = c => `<button data-c="${esc(c)}" aria-pressed="${S.chars.includes(c)}">${esc(c)}</button>`;
   $("picker").innerHTML = alpha(KOCH).map(btn).join("");
@@ -372,7 +373,7 @@ $("checkBtn").onclick = () => {
   const x = X(), as = assignment();
   const entry = { d: Date.now(), s: activeChars().join(""), a: acc, w: x.wpm, e: x.eff, errors: errs, total, sent: sent.join(" "), typed: typed.join(" "), as: as ? as.id : undefined };
   history.unshift(entry); history = history.slice(0, 50); renderHist();
-  api("result", entry).catch(e => toast("Risultato non salvato: " + e.message));
+  api("result", entry).then(() => { if (entry.as) refreshClasses(); }).catch(e => toast("Risultato non salvato: " + e.message));
   sent = []; $("checkBtn").disabled = true;
   $("results").scrollIntoView({ behavior: "smooth", block: "start" });
 };
@@ -442,6 +443,7 @@ function flushInstant(leaving = false) {
   const items = instQueue.splice(0, 200);
   instSending = true;
   api("instant", { items }, undefined, { keepalive: leaving })
+    .then(() => { if (!leaving && items.some(x => x.as)) refreshClasses(); })
     .catch(e => {
       if (e.status && e.status !== 429 && e.status < 500) return; // dati rifiutati: inutile riprovare
       instQueue.unshift(...items); instQueue = instQueue.slice(-1000);
@@ -759,10 +761,15 @@ function applyClasses(c) {
   renderSet(); renderMyClasses();
   if (!$("v-class").hidden) renderTutor();
 }
+// Dopo una sessione di un esercizio della classe: aggiorna a che punto è l'obiettivo
+const refreshClasses = () => api("classes").then(r => applyClasses(r.classes)).catch(() => {});
 // Allievo: entrare con il codice, vedere le classi, uscirne
 function renderMyClasses() {
   $("myClasses").innerHTML = CL.joined.map(c =>
-    `<li><span>${esc(c.name)}, tutor ${esc(c.tutor)}, ${c.assignments.length} ${c.assignments.length === 1 ? "esercizio" : "esercizi"}</span><button class="lnk" data-leave="${c.id}">Esci</button></li>`).join("");
+    `<li><span><b>${esc(c.name)}</b>, tutor ${esc(c.tutor)}` + c.assignments.map(a => {
+      const gs = goalState(a.goal, a.status, a.due);
+      return `<br>${esc(a.title)}${gs ? `<span class="gs ${gs.tone}" style="display:block">${esc(gs.text)}</span>` : ""}`;
+    }).join("") + `</span><button class="lnk" data-leave="${c.id}">Esci</button></li>`).join("");
 }
 $("joinForm").addEventListener("submit", async e => {
   e.preventDefault();
@@ -783,6 +790,32 @@ $("myClasses").addEventListener("click", async e => {
 // Tutor: classi, codice di invito, allievi, esercizi assegnati e progressi
 let clSel = null, progData = null;
 const clCur = () => CL.own.find(c => c.id === clSel) || CL.own[0] || null;
+// Obiettivi e scadenze: date confrontate nel giorno locale del telefono
+const dmy = d => d.slice(8, 10) + "/" + d.slice(5, 7);
+const localDay = ms => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+function goalText(g) {
+  if (!g) return "";
+  const parts = [];
+  if (g.groups) parts.push(`${g.groups.n} ${g.groups.n === 1 ? "sessione" : "sessioni"} sopra il ${g.groups.acc}%`);
+  if (g.instant) parts.push(`Rapido: ultime ${g.instant.n} risposte al ${g.instant.acc}%${g.instant.ms ? ", sotto " + secs(g.instant.ms) : ""}`);
+  return "Obiettivo: " + parts.join(" e ");
+}
+// Stato dell'obiettivo per un allievo: testo e tono (ok, bad o neutro)
+function goalState(g, st, due) {
+  const today = localDay(Date.now());
+  if (!g || !st) return due ? { text: today > due ? `Scaduto il ${dmy(due)}` : `Entro il ${dmy(due)}`, tone: "" } : null;
+  if (st.done) {
+    const day = localDay(st.doneTs), late = due && day > due;
+    return { text: `Obiettivo raggiunto il ${dmy(day)}${late ? ", dopo la scadenza" : ""}`, tone: late ? "" : "ok" };
+  }
+  const parts = [];
+  if (st.groups) parts.push(`${st.groups.have} di ${st.groups.need} sessioni sopra il ${g.groups.acc}%`);
+  if (st.instant) parts.push(st.instant.acc == null
+    ? `${st.instant.answers} di ${st.instant.need} risposte`
+    : `ultime ${st.instant.need} risposte al ${st.instant.acc}%${st.instant.ms != null ? " in " + secs(st.instant.ms) : ""}`);
+  const late = due && today > due;
+  return { text: parts.join(" · ") + (due ? (late ? ` · scaduto il ${dmy(due)}` : ` · entro il ${dmy(due)}`) : ""), tone: late ? "bad" : "" };
+}
 const assignSummary = st => `${alpha([...st.chars]).join(" ")} · ${st.eff < st.wpm ? st.wpm + "/" + st.eff : st.wpm} WPM · gruppi di ${st.randLen ? "2–7" : st.glen} · ${st.mins} min`;
 function currentAssignSettings() {
   const x = X();
@@ -799,7 +832,7 @@ function renderTutor() {
     ? c.members.map(m => `<li><span>${esc(m.username)}</span><button class="lnk" data-kick="${m.id}">Togli</button></li>`).join("")
     : '<li class="muted">Nessun allievo ancora.</li>';
   $("clAssigns").innerHTML = c.assignments.length
-    ? c.assignments.map(a => `<li><span><b>${esc(a.title)}</b><br><span class="muted">${esc(assignSummary(a.settings))}</span></span><button class="lnk" data-archive="${a.id}">Archivia</button></li>`).join("")
+    ? c.assignments.map(a => `<li><span><b>${esc(a.title)}</b><br><span class="muted">${esc(assignSummary(a.settings))}${a.goal ? "<br>" + esc(goalText(a.goal)) : ""}${a.due ? "<br>Scadenza " + dmy(a.due) : ""}</span></span><button class="lnk" data-archive="${a.id}">Archivia</button></li>`).join("")
     : '<li class="muted">Nessun esercizio assegnato.</li>';
   const st = currentAssignSettings();
   $("clFrom").textContent = st.chars
@@ -840,7 +873,13 @@ $("clAssigns").addEventListener("click", e => {
 $("clAssignForm").addEventListener("submit", e => {
   e.preventDefault();
   const c = clCur(), title = $("clTitle").value.trim(); if (!c || !title) return;
-  tutorCall("assign_create", { class: c.id, title, settings: currentAssignSettings() }, () => { $("clTitle").value = ""; $("clTitle").blur(); toast(`Esercizio «${title}» assegnato`); });
+  const goal = {
+    groups: $("gG").checked ? { n: +$("gGn").value, acc: +$("gGacc").value } : null,
+    instant: $("gI").checked ? { n: +$("gIn").value, acc: +$("gIacc").value, ms: $("gIms").value ? Math.round(+$("gIms").value * 1000) : null } : null
+  };
+  tutorCall("assign_create", { class: c.id, title, settings: currentAssignSettings(), goal, due: $("gDue").value || null }, () => {
+    $("clTitle").value = ""; $("clTitle").blur(); toast(`Esercizio «${title}» assegnato`);
+  });
 });
 async function loadProgress() {
   const c = clCur(); if (!c || $("v-class").hidden) return;
@@ -848,20 +887,35 @@ async function loadProgress() {
   catch (err) { $("clProg").innerHTML = `<li class="muted">${esc(err.message)}</li>`; }
 }
 $("clProgPick").addEventListener("change", renderProgress);
+// I campi dell'obiettivo si attivano solo con la casella spuntata
+function syncGoalForm() {
+  ["gGn", "gGacc"].forEach(id => { $(id).disabled = !$("gG").checked; });
+  ["gIn", "gIacc", "gIms"].forEach(id => { $(id).disabled = !$("gI").checked; });
+}
+["gG", "gI"].forEach(id => $(id).addEventListener("change", syncGoalForm));
+syncGoalForm();
 function renderProgress() {
   const c = clCur(), d = progData;
   if (!c || !d) { $("clProg").innerHTML = ""; $("clWeak").innerHTML = ""; return; }
   const a = d.assignments.find(x => x.id === +$("clProgPick").value) || d.assignments[0];
   if (!a || !d.members.length) {
     $("clProg").innerHTML = `<li class="muted">${!a ? "Assegna un esercizio per vedere i progressi." : "Nessun allievo nella classe."}</li>`;
+    $("clProgGoal").textContent = "";
     $("clWeak").innerHTML = ""; return;
   }
   const name = Object.fromEntries(d.members.map(m => [m.id, m.username]));
   const groupsLine = g => g ? `${g.n} ${g.n === 1 ? "sessione" : "sessioni"}, ultima ${g.last}%, migliore ${g.best}%` : "nessuna sessione";
   const instantLine = i => i ? `${i.n} ${i.n === 1 ? "risposta" : "risposte"}, ${i.acc}%${i.ms != null ? ", " + secs(i.ms) : ""}` : "nessuna risposta";
-  $("clProg").innerHTML = a.students.map(s => `<li><b>${esc(name[s.id])}</b>` +
-    `<div class="st"><span>Gruppi</span><span>${groupsLine(s.g)}</span></div>` +
-    `<div class="st"><span>Rapido</span><span>${instantLine(s.i)}</span></div></li>`).join("");
+  const done = a.students.filter(s => s.status && s.status.done).length;
+  $("clProgGoal").textContent = [goalText(a.goal), a.due ? "Scadenza " + dmy(a.due) : "",
+    a.goal ? `${done} di ${a.students.length} ${a.students.length === 1 ? "allievo l’ha raggiunto" : "allievi l’hanno raggiunto"}` : ""].filter(Boolean).join(" · ");
+  $("clProg").innerHTML = a.students.map(s => {
+    const gs = goalState(a.goal, s.status, a.due);
+    return `<li><b>${esc(name[s.id])}</b>` +
+      (gs && a.goal ? `<div class="gs ${gs.tone}">${esc(gs.text)}</div>` : "") +
+      `<div class="st"><span>Gruppi</span><span>${groupsLine(s.g)}</span></div>` +
+      `<div class="st"><span>Rapido</span><span>${instantLine(s.i)}</span></div></li>`;
+  }).join("");
   const weak = a.chars.filter(x => x.n >= 5).map(x => Object.assign({}, x, { acc: Math.round((1 - x.err / x.n) * 100) }))
     .sort((p, q) => p.acc - q.acc || q.n - p.n).slice(0, 8);
   $("clWeak").innerHTML = weak.length
