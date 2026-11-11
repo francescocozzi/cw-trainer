@@ -12,6 +12,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      prova:
+        description: "Solo prova: mostra cosa cambierebbe sul server senza copiare nulla"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -59,10 +64,11 @@ jobs:
           SSH_PORT: ${{ secrets.SSH_PORT }}
           SSH_USER: ${{ secrets.SSH_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DRY_RUN: ${{ inputs.prova && '--dry-run' || '' }}
         # config.php e i dati restano quelli del server; i file tolti dal repository
         # non vengono cancellati in produzione (niente --delete)
         run: |
-          rsync -rlptvz --chmod=D755,F644 \
+          rsync -rlptz --itemize-changes $DRY_RUN --chmod=D755,F644 \
             -e "ssh -i ~/.ssh/deploy -p ${SSH_PORT:-22} -o StrictHostKeyChecking=yes" \
             --include='data/' --include='data/.htaccess' --exclude='data/**' \
             --exclude='.git/' --exclude='.github/' --exclude='.gitignore' \
