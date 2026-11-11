@@ -75,6 +75,34 @@ function cw_migrate(PDO $db, string $driver): void
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             ip VARCHAR(45) NOT NULL, username VARCHAR(64) NOT NULL, ts INT NOT NULL,
             KEY ts (ts)) $t");
+        $db->exec("CREATE TABLE IF NOT EXISTS tutors (
+            user_id INT UNSIGNED PRIMARY KEY,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) $t");
+        $db->exec("CREATE TABLE IF NOT EXISTS classes (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            tutor_id INT UNSIGNED NOT NULL,
+            name VARCHAR(60) NOT NULL,
+            code VARCHAR(16) NOT NULL UNIQUE,
+            created_at INT NOT NULL,
+            FOREIGN KEY (tutor_id) REFERENCES users(id) ON DELETE CASCADE) $t");
+        $db->exec("CREATE TABLE IF NOT EXISTS class_members (
+            class_id INT UNSIGNED NOT NULL,
+            user_id INT UNSIGNED NOT NULL,
+            joined_at INT NOT NULL,
+            PRIMARY KEY (class_id, user_id),
+            FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) $t");
+        $db->exec("CREATE TABLE IF NOT EXISTS assignments (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            class_id INT UNSIGNED NOT NULL,
+            title VARCHAR(60) NOT NULL,
+            settings TEXT NOT NULL,
+            created_at INT NOT NULL,
+            archived TINYINT NOT NULL DEFAULT 0,
+            KEY class_id (class_id),
+            FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE) $t");
+        cw_add_column($db, $driver, 'results', 'assignment_id', 'INT UNSIGNED NULL');
+        cw_add_column($db, $driver, 'instant', 'assignment_id', 'INT UNSIGNED NULL');
         return;
     }
     $db->exec('CREATE TABLE IF NOT EXISTS users (
@@ -108,6 +136,45 @@ function cw_migrate(PDO $db, string $driver): void
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ip TEXT NOT NULL, username TEXT NOT NULL, ts INTEGER NOT NULL)');
     $db->exec('CREATE INDEX IF NOT EXISTS login_attempts_ts ON login_attempts (ts)');
+
+    // ---- Classi: un tutor crea classi, gli allievi entrano con un codice di invito ----
+    $db->exec('CREATE TABLE IF NOT EXISTS tutors (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE)');
+    $db->exec('CREATE TABLE IF NOT EXISTS classes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tutor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        code TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL)');
+    $db->exec('CREATE TABLE IF NOT EXISTS class_members (
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        joined_at INTEGER NOT NULL,
+        PRIMARY KEY (class_id, user_id))');
+    // Gli esercizi archiviati spariscono per gli allievi ma restano collegati ai risultati
+    $db->exec('CREATE TABLE IF NOT EXISTS assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        settings TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        archived INTEGER NOT NULL DEFAULT 0)');
+    $db->exec('CREATE INDEX IF NOT EXISTS assignments_class ON assignments (class_id)');
+    cw_add_column($db, $driver, 'results', 'assignment_id', 'INTEGER');
+    cw_add_column($db, $driver, 'instant', 'assignment_id', 'INTEGER');
+}
+
+/** Aggiunge una colonna a una tabella esistente, se manca (i database già installati). */
+function cw_add_column(PDO $db, string $driver, string $table, string $column, string $type): void
+{
+    if ($driver === 'sqlite') {
+        $cols = array_column($db->query("PRAGMA table_info($table)")->fetchAll(), 'name');
+    } else {
+        $cols = array_column($db->query("SHOW COLUMNS FROM $table")->fetchAll(), 'Field');
+    }
+    if (!in_array($column, $cols, true)) {
+        $db->exec("ALTER TABLE $table ADD COLUMN $column $type");
+    }
 }
 
 /** Errore con un messaggio mostrabile all’utente. */
@@ -215,6 +282,7 @@ function cw_clean_settings($in): array
     }
     $mode = is_string($in['mode'] ?? null) ? $in['mode'] : 'custom';
     $okMode = in_array($mode, ['custom', 'letters', 'numbers', 'mixed'], true)
+        || preg_match('/^class:[0-9]{1,10}$/', $mode)
         || (strpos($mode, 'set:') === 0 && isset($sets[substr($mode, 4)]));
     $wpm = cw_clean_int($in['wpm'] ?? null, 5, 60, 20);
     return [
@@ -241,7 +309,59 @@ function cw_delete_user(PDO $db, int $userId): void
     $db->beginTransaction();
     $db->prepare('DELETE FROM results WHERE user_id = ?')->execute([$userId]);
     $db->prepare('DELETE FROM instant WHERE user_id = ?')->execute([$userId]);
+    $db->prepare('DELETE FROM class_members WHERE user_id = ?')->execute([$userId]);
+    $db->prepare('DELETE FROM assignments WHERE class_id IN (SELECT id FROM classes WHERE tutor_id = ?)')->execute([$userId]);
+    $db->prepare('DELETE FROM class_members WHERE class_id IN (SELECT id FROM classes WHERE tutor_id = ?)')->execute([$userId]);
+    $db->prepare('DELETE FROM classes WHERE tutor_id = ?')->execute([$userId]);
+    $db->prepare('DELETE FROM tutors WHERE user_id = ?')->execute([$userId]);
     $db->prepare('DELETE FROM settings WHERE user_id = ?')->execute([$userId]);
     $db->prepare('DELETE FROM users WHERE id = ?')->execute([$userId]);
     $db->commit();
+}
+
+// ---- Classi ----
+
+function cw_is_tutor(PDO $db, int $userId): bool
+{
+    $st = $db->prepare('SELECT 1 FROM tutors WHERE user_id = ?');
+    $st->execute([$userId]);
+    return (bool)$st->fetchColumn();
+}
+
+/** Codice di invito: 8 caratteri senza quelli che si confondono (0/O, 1/I/L). */
+function cw_new_class_code(): string
+{
+    $chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    $c = '';
+    for ($i = 0; $i < 8; $i++) {
+        $c .= $chars[random_int(0, strlen($chars) - 1)];
+    }
+    return $c;
+}
+
+/** Il codice scritto dall'allievo: maiuscolo, senza spazi né trattini. */
+function cw_normalize_code($v): string
+{
+    return is_string($v) ? substr(preg_replace('/[^A-Z0-9]/', '', strtoupper($v)) ?? '', 0, 16) : '';
+}
+
+function cw_clean_name($v, int $max): string
+{
+    return is_string($v) ? trim(preg_replace('/[\x00-\x1F\x7F]/u', '', mb_substr($v, 0, $max)) ?? '') : '';
+}
+
+/**
+ * Le impostazioni che il tutor fissa per un esercizio: cosa si ascolta e a che velocità.
+ * Tono, volume, ritardo, risposta a voce e trascrizione a blocchi restano dell'allievo.
+ */
+function cw_clean_assignment($in): array
+{
+    $s = cw_clean_settings($in);
+    if ($s['chars'] === '') {
+        throw new CwError('Scegli almeno un carattere per l’esercizio.');
+    }
+    return [
+        'chars' => $s['chars'], 'wpm' => $s['wpm'], 'eff' => $s['eff'], 'extra' => $s['extra'],
+        'glen' => $s['glen'], 'randLen' => $s['randLen'], 'mins' => $s['mins'], 'pre' => $s['pre'],
+    ];
 }

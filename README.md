@@ -26,8 +26,15 @@ Trainer CW per mobile con account utente. Frontend in un solo file HTML, backend
     php manage.php add <utente>       crea un utente con password generata
     php manage.php passwd <utente>    genera una nuova password
     php manage.php del <utente>       elimina l’utente e tutti i suoi dati
+    php manage.php tutor <utente>     rende tutor l’utente (o gli toglie il ruolo)
 
 Ogni utente può cambiare la propria password dalle impostazioni dell’app.
+
+## Classi
+
+Un tutor crea una classe dalla vista «Classe» e riceve un codice di invito. Gli allievi lo inseriscono in Impostazioni › Classi. Il tutor assegna esercizi che fissano caratteri, velocità, gruppi e durata, prendendoli dalle proprie impostazioni del momento. Tono, volume, ritardo, risposta a voce e trascrizione a blocchi restano scelte dell’allievo. Gli esercizi compaiono nel menu Modo dell’allievo e valgono sia per i gruppi sia per il Rapido.
+
+Il tutor vede soltanto i risultati degli esercizi assegnati, e solo degli allievi ancora in classe. L’allievo può uscire quando vuole. Il codice si può rigenerare: quello vecchio smette di funzionare. I tentativi con un codice sbagliato hanno lo stesso limite degli accessi.
 
 ## Sicurezza
 

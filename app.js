@@ -20,6 +20,17 @@ const S = JSON.parse(JSON.stringify(DEFAULTS));
 let history = [];
 const $ = id => document.getElementById(id);
 const selectedChars = () => ALL.filter(c => S.chars.includes(c));
+// Classi: in quali è allievo l'utente e, se è tutor, quali gestisce
+let CL = { tutor: false, joined: [], own: [] };
+// Esercizio della classe scelto nel menu Modo: le sue impostazioni valgono solo per la sessione
+function assignment() {
+  const m = /^class:(\d+)$/.exec(S.mode || "");
+  if (!m) return null;
+  for (const c of CL.joined) { const a = c.assignments.find(x => x.id === +m[1]); if (a) return Object.assign({ cls: c }, a); }
+  return null;
+}
+// Impostazioni effettive: quelle dell'allievo, con cosa ascoltare e a che velocità fissati dal tutor
+const X = () => { const a = assignment(); return a ? Object.assign({}, S, a.settings) : S; };
 function toast(msg) {
   const t = $("toast"); t.textContent = msg; t.hidden = false;
   clearTimeout(t._h); t._h = setTimeout(() => { t.hidden = true; }, 3500);
@@ -56,6 +67,7 @@ function activeChars() {
   if (m === "numbers") return GROUPS.numbers;
   if (m === "mixed") return [...GROUPS.letters, ...GROUPS.numbers];
   if (m.startsWith("set:")) { const s = S.sets.find(x => x.name === m.slice(4)); if (s) return ALL.filter(c => s.chars.includes(c)); }
+  const a = assignment(); if (a) return ALL.filter(c => a.settings.chars.includes(c));
   return selectedChars();
 }
 
@@ -105,7 +117,7 @@ function walk(text, o, onTone) {
 // o: { wpm, eff, extra, delay, freq }
 function play(text, onEnd, opt = {}) {
   stop();
-  const o = Object.assign({ wpm: S.wpm, eff: S.wpm, extra: 0, delay: 0, freq: pickFreq() }, opt);
+  const o = Object.assign({ wpm: X().wpm, eff: X().wpm, extra: 0, delay: 0, freq: pickFreq() }, opt);
   const c = ensureCtx();
   const osc = c.createOscillator(), g = c.createGain();
   osc.type = "sine"; osc.frequency.value = o.freq;
@@ -156,11 +168,11 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 
 /* ---------- Esercizio ---------- */
 const randChar = set => set[Math.floor(Math.random() * set.length)];
-const sessionOpts = () => ({ wpm: S.wpm, eff: S.eff, extra: S.extra });
+const sessionOpts = () => { const x = X(); return { wpm: x.wpm, eff: x.eff, extra: x.extra }; };
 function genGroups() {
-  const set = activeChars(), groups = [], target = S.mins * 60;
+  const x = X(), set = activeChars(), groups = [], target = x.mins * 60;
   while (groups.length < 400) {
-    const len = S.randLen ? 2 + Math.floor(Math.random() * 6) : S.glen;
+    const len = x.randLen ? 2 + Math.floor(Math.random() * 6) : x.glen;
     let g = ""; for (let i = 0; i < len; i++) g += randChar(set);
     groups.push(g);
     if (walk(groups.join(" "), sessionOpts()) >= target) break;
@@ -169,19 +181,25 @@ function genGroups() {
 }
 function renderSet() {
   const opts = [["custom", "Caratteri custom"], ["letters", "Lettere"], ["numbers", "Cifre"], ["mixed", "Lettere e cifre"]].concat(S.sets.map(s => ["set:" + s.name, "Set: " + s.name]));
-  if (!opts.some(o => o[0] === S.mode)) S.mode = "custom";
-  $("mode").innerHTML = opts.map(([v, l]) => `<option value="${esc(v)}"${v === S.mode ? " selected" : ""}>${esc(l)}</option>`).join("");
-  $("dur").innerHTML = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(m => `<option value="${m}"${m === S.mins ? " selected" : ""}>${m} min</option>`).join("");
-  $("durTitle").textContent = `(${S.mins} min)`;
+  const classOpts = CL.joined.flatMap(c => c.assignments.map(a => ["class:" + a.id, `${c.name}: ${a.title}`]));
+  if (!opts.concat(classOpts).some(o => o[0] === S.mode)) S.mode = "custom";
+  const optHTML = list => list.map(([v, l]) => `<option value="${esc(v)}"${v === S.mode ? " selected" : ""}>${esc(l)}</option>`).join("");
+  $("mode").innerHTML = optHTML(opts) + (classOpts.length ? `<optgroup label="Esercizi della classe">${optHTML(classOpts)}</optgroup>` : "");
+  const x = X(), a = assignment();
+  $("dur").innerHTML = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(m => `<option value="${m}"${m === x.mins ? " selected" : ""}>${m} min</option>`).join("");
+  $("dur").disabled = !!a;
+  $("durTitle").textContent = `(${x.mins} min)`;
   const set = activeChars();
   $("charset").textContent = set.length ? alpha(set).join(" ") : "Nessun carattere custom selezionato: tocca «Cambia»";
   const tone = S.randTone ? "casuale" : S.freq + " Hz";
-  $("params").innerHTML = `Velocità carattere <b>${S.wpm} WPM</b>, effettiva <b>${S.eff} WPM</b>, tono <b>${tone}</b>, ritardo <b>${S.delay} s</b>. <button class="lnk" id="chg">Cambia</button>`;
+  $("params").innerHTML = a
+    ? `Esercizio di <b>${esc(a.cls.tutor)}</b>: velocità carattere <b>${x.wpm} WPM</b>, effettiva <b>${x.eff} WPM</b>, gruppi di <b>${x.randLen ? "2–7" : x.glen}</b>. Tono <b>${tone}</b> e ritardo <b>${S.delay} s</b> sono tuoi. <button class="lnk" id="chg">Cambia</button>`
+    : `Velocità carattere <b>${S.wpm} WPM</b>, effettiva <b>${S.eff} WPM</b>, tono <b>${tone}</b>, ritardo <b>${S.delay} s</b>. <button class="lnk" id="chg">Cambia</button>`;
   const btn = c => `<button data-c="${esc(c)}" aria-pressed="${S.chars.includes(c)}">${esc(c)}</button>`;
   $("picker").innerHTML = alpha(KOCH).map(btn).join("");
   $("pickerX").innerHTML = alpha(EXTRAS).map(btn).join("");
   $("saved").innerHTML = S.sets.map((s, i) => `<button data-i="${i}" aria-pressed="${s.chars === S.chars}">${esc(s.name)}<span data-del="${i}" aria-label="Elimina set">×</span></button>`).join("");
-  $("speedTag").textContent = S.eff < S.wpm ? `${S.wpm}/${S.eff} WPM` : `${S.wpm} WPM`;
+  $("speedTag").textContent = x.eff < x.wpm ? `${x.wpm}/${x.eff} WPM` : `${x.wpm} WPM`;
   renderKeys();
 }
 function setChars(str) {
@@ -224,7 +242,7 @@ let sent = [], sess = "idle", ticker = null;
 const ICON_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16l13-8z"/></svg>';
 const ICON_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>';
 const fmt = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
-const sessionText = () => (S.pre ? "VVV = " : "") + sent.join(" ") + (S.pre ? " +" : "");
+const sessionText = () => { const p = X().pre; return (p ? "VVV = " : "") + sent.join(" ") + (p ? " +" : ""); };
 function setStatus(txt, live) { const el = $("status"); el.textContent = txt; el.classList.toggle("live", !!live); }
 function setPP(playing) { $("ppBtn").innerHTML = playing ? ICON_PAUSE : ICON_PLAY; $("ppBtn").setAttribute("aria-label", playing ? "Pausa" : "Play"); }
 function tick() {
@@ -242,7 +260,7 @@ function halt() {
 function newExercise() {
   halt(); sess = "idle"; sent = [];
   $("answer").value = ""; $("results").hidden = true; $("checkBtn").disabled = true; renderBlocks();
-  $("bar").style.width = "0"; $("tNow").textContent = "0:00"; $("tTot").textContent = fmt(S.mins * 60);
+  $("bar").style.width = "0"; $("tNow").textContent = "0:00"; $("tTot").textContent = fmt(X().mins * 60);
   setStatus(activeChars().length ? "Premi Play e trascrivi i gruppi" : "Nessun carattere custom selezionato: tocca «Cambia»", false);
 }
 $("ppBtn").onclick = () => {
@@ -301,14 +319,14 @@ function splitStream(text, sentG) {
 /* ---------- Trascrizione a blocchi ---------- */
 // Il campo di testo resta quello vero (tastiera, accessibilità), invisibile sopra la griglia.
 // Si scrive solo in coda: niente spazi e cursore sempre alla fine.
-const gridMode = () => S.noSpace && !S.randLen;
+const gridMode = () => S.noSpace && !X().randLen;
 function renderBlocks() {
   const on = gridMode();
   $("typing").classList.toggle("grid", on);
   if (!on) return;
   const ta = $("answer"), v = [...ta.value];
   if (!sent.length && !v.length) { $("blocks").innerHTML = '<p class="muted">I blocchi compaiono quando parte la trasmissione.</p>'; return; }
-  const n = S.glen, cur = Math.floor(v.length / n), count = Math.max(sent.length, cur + 1);
+  const n = X().glen, cur = Math.floor(v.length / n), count = Math.max(sent.length, cur + 1);
   $("blocks").style.setProperty("--n", n);
   let html = "";
   for (let i = 0; i < count; i++) {
@@ -351,7 +369,8 @@ $("checkBtn").onclick = () => {
   const sc = $("score"); sc.textContent = acc + "%"; sc.className = "score " + (acc >= 90 ? "good" : "bad");
   $("scoreNote").textContent = `${errs} errori su ${total} caratteri`;
   $("results").hidden = false;
-  const entry = { d: Date.now(), s: activeChars().join(""), a: acc, w: S.wpm, e: S.eff, errors: errs, total, sent: sent.join(" "), typed: typed.join(" ") };
+  const x = X(), as = assignment();
+  const entry = { d: Date.now(), s: activeChars().join(""), a: acc, w: x.wpm, e: x.eff, errors: errs, total, sent: sent.join(" "), typed: typed.join(" "), as: as ? as.id : undefined };
   history.unshift(entry); history = history.slice(0, 50); renderHist();
   api("result", entry).catch(e => toast("Risultato non salvato: " + e.message));
   sent = []; $("checkBtn").disabled = true;
@@ -404,7 +423,8 @@ function answer(c, voice = false) {
   busy = true; stopListen();
   // Il tempo non è confrontabile se il carattere è stato riascoltato o la risposta è a voce
   const ms = voice || replayed ? null : Math.max(0, Math.round(performance.now() - toneEnd));
-  instQueue.push({ c: target, a: c, t: Date.now(), ms, v: voice, w: S.wpm });
+  const as = assignment();
+  instQueue.push({ c: target, a: c, t: Date.now(), ms, v: voice, w: X().wpm, as: as ? as.id : undefined });
   if (instQueue.length >= 20) flushInstant();
   const ok = c === target, b = $("keys").querySelector(`button[data-c="${CSS.escape(c)}"]`);
   if (b) b.classList.add(ok ? "ok" : "bad");
@@ -570,12 +590,13 @@ function showView(v) {
   VIEWS.forEach(id => { $("v-" + id).hidden = id !== v; });
   if (v !== "instant") { stopListen(); flushInstant(); }
   if (v === "stats") loadStats();
+  if (v === "class") { renderTutor(); loadProgress(); }
   window.scrollTo(0, 0);
 }
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => showView(b.dataset.view));
 
 /* ---------- Statistiche ---------- */
-const VIEWS = ["koch", "instant", "stats", "settings"];
+const VIEWS = ["koch", "instant", "stats", "class", "settings"];
 let statsData = null, showAllChars = false, practiceChars = [], showAllIChars = false, iPracticeChars = [];
 let stMode = lsGet("cw-stmode") === "instant" ? "instant" : "groups";
 const secs = ms => (ms / 1000).toFixed(2).replace(".", ",") + " s";
@@ -730,6 +751,124 @@ function practiceOn(chars, view) {
 $("stPractice").onclick = () => practiceOn(practiceChars, "koch");
 $("stIPractice").onclick = () => practiceOn(iPracticeChars, "instant");
 
+/* ---------- Classi ---------- */
+const codeFmt = c => c.length === 8 ? c.slice(0, 4) + "-" + c.slice(4) : c;
+function applyClasses(c) {
+  CL = c || { tutor: false, joined: [], own: [] };
+  $("navClass").hidden = !CL.tutor;
+  renderSet(); renderMyClasses();
+  if (!$("v-class").hidden) renderTutor();
+}
+// Allievo: entrare con il codice, vedere le classi, uscirne
+function renderMyClasses() {
+  $("myClasses").innerHTML = CL.joined.map(c =>
+    `<li><span>${esc(c.name)}, tutor ${esc(c.tutor)}, ${c.assignments.length} ${c.assignments.length === 1 ? "esercizio" : "esercizi"}</span><button class="lnk" data-leave="${c.id}">Esci</button></li>`).join("");
+}
+$("joinForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const code = $("joinCode").value.trim(); if (!code) return;
+  try {
+    const r = await api("class_join", { code });
+    $("joinCode").value = ""; $("joinCode").blur();
+    applyClasses(r.classes); toast(`Sei nella classe «${r.name}»: trovi gli esercizi nel menu Modo`);
+  } catch (err) { toast(err.message); }
+});
+$("myClasses").addEventListener("click", async e => {
+  const b = e.target.closest("[data-leave]"); if (!b) return;
+  const c = CL.joined.find(x => x.id === +b.dataset.leave);
+  if (!c || !confirm(`Uscire dalla classe «${c.name}»? Il tutor non vedrà più i tuoi risultati.`)) return;
+  try { applyClasses((await api("class_leave", { id: c.id })).classes); } catch (err) { toast(err.message); }
+});
+
+// Tutor: classi, codice di invito, allievi, esercizi assegnati e progressi
+let clSel = null, progData = null;
+const clCur = () => CL.own.find(c => c.id === clSel) || CL.own[0] || null;
+const assignSummary = st => `${alpha([...st.chars]).join(" ")} · ${st.eff < st.wpm ? st.wpm + "/" + st.eff : st.wpm} WPM · gruppi di ${st.randLen ? "2–7" : st.glen} · ${st.mins} min`;
+function currentAssignSettings() {
+  const x = X();
+  return { chars: activeChars().join(""), wpm: x.wpm, eff: x.eff, extra: x.extra, glen: x.glen, randLen: x.randLen, mins: x.mins, pre: x.pre };
+}
+function renderTutor() {
+  const c = clCur(); clSel = c ? c.id : null;
+  $("clEmpty").hidden = !!c;
+  ["clPick", "clBox", "clAssignPanel", "clProgPanel"].forEach(id => { $(id).hidden = !c; });
+  if (!c) return;
+  $("clPick").innerHTML = CL.own.map(x => `<option value="${x.id}"${x.id === c.id ? " selected" : ""}>${esc(x.name)}</option>`).join("");
+  $("clCode").textContent = codeFmt(c.code);
+  $("clMembers").innerHTML = c.members.length
+    ? c.members.map(m => `<li><span>${esc(m.username)}</span><button class="lnk" data-kick="${m.id}">Togli</button></li>`).join("")
+    : '<li class="muted">Nessun allievo ancora.</li>';
+  $("clAssigns").innerHTML = c.assignments.length
+    ? c.assignments.map(a => `<li><span><b>${esc(a.title)}</b><br><span class="muted">${esc(assignSummary(a.settings))}</span></span><button class="lnk" data-archive="${a.id}">Archivia</button></li>`).join("")
+    : '<li class="muted">Nessun esercizio assegnato.</li>';
+  const st = currentAssignSettings();
+  $("clFrom").textContent = st.chars
+    ? `Il nuovo esercizio usa le tue impostazioni attuali: ${assignSummary(st)}. Per cambiarle, scegli caratteri e modo in Esercizio e velocità e gruppi in Impostazioni.`
+    : "Scegli prima dei caratteri in Esercizio: il nuovo esercizio usa le tue impostazioni attuali.";
+  const pick = $("clProgPick"), prev = +pick.value;
+  pick.innerHTML = c.assignments.map(a => `<option value="${a.id}"${a.id === prev ? " selected" : ""}>${esc(a.title)}</option>`).join("");
+  pick.hidden = !c.assignments.length;
+  renderProgress();
+}
+async function tutorCall(action, body, ok) {
+  try { const r = await api(action, body); applyClasses(r.classes); if (ok) ok(r); loadProgress(); }
+  catch (err) { toast(err.message); }
+}
+$("clPick").addEventListener("change", e => { clSel = +e.target.value; renderTutor(); loadProgress(); });
+$("clNew").onclick = () => {
+  const name = (prompt("Nome della classe, es. Corso CW 2027") || "").trim(); if (!name) return;
+  tutorCall("class_create", { name }, r => { clSel = r.id; renderTutor(); });
+};
+$("clNewCode").onclick = () => {
+  const c = clCur(); if (!c || !confirm("Creare un nuovo codice? Quello attuale smette di funzionare; gli allievi già entrati restano.")) return;
+  tutorCall("class_code", { id: c.id });
+};
+$("clDelete").onclick = () => {
+  const c = clCur(); if (!c || !confirm(`Eliminare la classe «${c.name}»? Gli allievi ne escono e gli esercizi spariscono dal loro menu. I loro risultati restano a loro. Non si può annullare.`)) return;
+  clSel = null; tutorCall("class_delete", { id: c.id });
+};
+$("clMembers").addEventListener("click", e => {
+  const b = e.target.closest("[data-kick]"); const c = clCur(); if (!b || !c) return;
+  const m = c.members.find(x => x.id === +b.dataset.kick);
+  if (m && confirm(`Togliere ${m.username} dalla classe? Non vedrai più i suoi risultati; potrà rientrare con il codice.`)) tutorCall("class_kick", { id: c.id, user: m.id });
+});
+$("clAssigns").addEventListener("click", e => {
+  const b = e.target.closest("[data-archive]"); const c = clCur(); if (!b || !c) return;
+  const a = c.assignments.find(x => x.id === +b.dataset.archive);
+  if (a && confirm(`Archiviare «${a.title}»? Sparisce dal menu degli allievi e dai progressi.`)) tutorCall("assign_archive", { id: a.id });
+});
+$("clAssignForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const c = clCur(), title = $("clTitle").value.trim(); if (!c || !title) return;
+  tutorCall("assign_create", { class: c.id, title, settings: currentAssignSettings() }, () => { $("clTitle").value = ""; $("clTitle").blur(); toast(`Esercizio «${title}» assegnato`); });
+});
+async function loadProgress() {
+  const c = clCur(); if (!c || $("v-class").hidden) return;
+  try { progData = await api("class_progress", undefined, { id: c.id }); renderProgress(); }
+  catch (err) { $("clProg").innerHTML = `<li class="muted">${esc(err.message)}</li>`; }
+}
+$("clProgPick").addEventListener("change", renderProgress);
+function renderProgress() {
+  const c = clCur(), d = progData;
+  if (!c || !d) { $("clProg").innerHTML = ""; $("clWeak").innerHTML = ""; return; }
+  const a = d.assignments.find(x => x.id === +$("clProgPick").value) || d.assignments[0];
+  if (!a || !d.members.length) {
+    $("clProg").innerHTML = `<li class="muted">${!a ? "Assegna un esercizio per vedere i progressi." : "Nessun allievo nella classe."}</li>`;
+    $("clWeak").innerHTML = ""; return;
+  }
+  const name = Object.fromEntries(d.members.map(m => [m.id, m.username]));
+  const groupsLine = g => g ? `${g.n} ${g.n === 1 ? "sessione" : "sessioni"}, ultima ${g.last}%, migliore ${g.best}%` : "nessuna sessione";
+  const instantLine = i => i ? `${i.n} ${i.n === 1 ? "risposta" : "risposte"}, ${i.acc}%${i.ms != null ? ", " + secs(i.ms) : ""}` : "nessuna risposta";
+  $("clProg").innerHTML = a.students.map(s => `<li><b>${esc(name[s.id])}</b>` +
+    `<div class="st"><span>Gruppi</span><span>${groupsLine(s.g)}</span></div>` +
+    `<div class="st"><span>Rapido</span><span>${instantLine(s.i)}</span></div></li>`).join("");
+  const weak = a.chars.filter(x => x.n >= 5).map(x => Object.assign({}, x, { acc: Math.round((1 - x.err / x.n) * 100) }))
+    .sort((p, q) => p.acc - q.acc || q.n - p.n).slice(0, 8);
+  $("clWeak").innerHTML = weak.length
+    ? weak.map(x => `<div class="crow"><span class="c">${esc(x.c)}</span><span class="b"><i style="width:${x.acc}%;background:var(${x.acc >= 90 ? "--ok" : "--err"})"></i></span><span class="v">${x.acc}% su ${x.n}</span></div>`).join("")
+    : '<p class="muted">Ancora pochi dati.</p>';
+}
+
 /* ---------- Account ---------- */
 function showLogin(on) {
   $("v-login").hidden = !on; $("nav").hidden = on;
@@ -755,6 +894,7 @@ async function startSession(user) {
   for (const k of Object.keys(S)) delete S[k];
   Object.assign(S, JSON.parse(JSON.stringify(DEFAULTS)), st.settings || {});
   history = st.history || [];
+  applyClasses(st.classes);
   showLogin(false); showView("koch");
   syncSettings(); renderSet(); renderHist(); newExercise();
 }

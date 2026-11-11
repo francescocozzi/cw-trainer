@@ -136,6 +136,15 @@ textarea{width:100%;min-height:150px;resize:vertical;border-radius:12px;border:1
 .blocks .muted{grid-column:1/-1;margin:0;font-size:16px;font-family:var(--body)}
 .sw:has(input:disabled){color:var(--muted);cursor:default}
 .sw input:disabled{opacity:.5}
+/* Classe */
+.code-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px}
+.code-row span{display:block;font-size:14px}
+.code-row b{font-size:26px;letter-spacing:.12em;color:var(--accent)}
+.row > input{flex:1;min-width:0}
+.prog-list{margin-top:6px}
+.hist.prog-list li{display:block}
+.prog-list .st{display:flex;gap:8px;font-size:15px;color:var(--muted);font-variant-numeric:tabular-nums}
+.prog-list .st span:first-child{flex:0 0 4.5em;color:var(--text);font-weight:600}
 textarea::placeholder{color:var(--muted);opacity:1;font-size:16px;letter-spacing:0;text-transform:none}
 
 .score{font-family:var(--display);font-size:56px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
@@ -179,7 +188,7 @@ input[type=range]:disabled{opacity:.35}
 .sw input:checked::after{transform:translateX(20px)}
 @media (prefers-reduced-motion:reduce){.sw input,.sw input::after{transition:none}}
 
-.fld input{font:inherit;font-size:17px;color:var(--text);background:var(--sunk);border:1px solid var(--line);border-radius:10px;height:46px;padding:0 12px;width:100%;font-weight:400}
+.fld input,.row > input{font:inherit;font-size:17px;color:var(--text);background:var(--sunk);border:1px solid var(--line);border-radius:10px;height:46px;padding:0 12px;width:100%;font-weight:400}
 #toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--text);color:var(--surface);padding:10px 16px;border-radius:10px;font-size:15px;z-index:10;max-width:90vw;text-align:center}
 /* Statistiche */
 .tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -370,6 +379,46 @@ body:has(textarea:focus,input:not([type=range]):not([type=checkbox]):focus) nav{
     </div>
   </section>
 
+  <!-- CLASSE (solo tutor) -->
+  <section id="v-class" hidden>
+    <div class="panel">
+      <div class="row">
+        <h2 style="margin:0">Classe</h2>
+        <button class="btn" id="clNew" style="flex:0 0 auto">Nuova classe</button>
+      </div>
+      <p class="muted" id="clEmpty" style="margin:10px 0 0">Non hai ancora classi. Creane una: riceverai un codice di invito da dare agli allievi.</p>
+      <select id="clPick" aria-label="Classe" style="margin-top:12px"></select>
+      <div id="clBox">
+        <div class="code-row">
+          <div><span class="muted">Codice di invito</span><b class="mono" id="clCode"></b></div>
+          <button class="lnk" id="clNewCode">Nuovo codice</button>
+        </div>
+        <p class="hint">Dai questo codice agli allievi: lo inseriscono in Impostazioni › Classi. Con un nuovo codice il vecchio smette di funzionare, chi è già entrato resta.</p>
+        <div class="sub">Allievi</div>
+        <ul class="hist" id="clMembers"></ul>
+        <button class="lnk" id="clDelete" style="margin-top:10px;color:var(--err)">Elimina la classe</button>
+      </div>
+    </div>
+    <div class="panel" id="clAssignPanel">
+      <h2>Esercizi assegnati</h2>
+      <p class="muted" style="margin:0">Un esercizio fissa caratteri, velocità, gruppi e durata. Tono, volume, ritardo, risposta a voce e trascrizione a blocchi restano scelte dell’allievo.</p>
+      <ul class="hist" id="clAssigns"></ul>
+      <div class="sub">Nuovo esercizio</div>
+      <p class="hint" id="clFrom"></p>
+      <form class="row" id="clAssignForm">
+        <input id="clTitle" maxlength="60" placeholder="Titolo, es. Lezione 3: K M U R" aria-label="Titolo dell’esercizio">
+        <button class="btn primary" style="flex:0 0 auto">Assegna</button>
+      </form>
+    </div>
+    <div class="panel" id="clProgPanel">
+      <h2>Progressi</h2>
+      <select id="clProgPick" aria-label="Esercizio"></select>
+      <ul class="hist prog-list" id="clProg"></ul>
+      <div class="sub">Caratteri più sbagliati dalla classe</div>
+      <div id="clWeak"></div>
+    </div>
+  </section>
+
   <!-- IMPOSTAZIONI -->
   <section id="v-settings" hidden>
     <div class="panel">
@@ -449,6 +498,16 @@ body:has(textarea:focus,input:not([type=range]):not([type=checkbox]):focus) nav{
     </div>
 
     <div class="panel">
+      <h2>Classi</h2>
+      <p class="muted" style="margin:0">Se segui un corso, inserisci il codice che ti ha dato il tutor. Gli esercizi della classe compaiono nel menu Modo. Il tutor vede solo i risultati di quegli esercizi, non il resto del tuo allenamento.</p>
+      <form class="row" id="joinForm" style="margin-top:10px">
+        <input id="joinCode" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="12" placeholder="Codice di invito" aria-label="Codice di invito">
+        <button class="btn" style="flex:0 0 auto">Entra</button>
+      </form>
+      <ul class="hist" id="myClasses"></ul>
+    </div>
+
+    <div class="panel">
       <h2>Account</h2>
       <p class="muted" style="margin-top:0">Connesso come <b id="whoami"></b>. Impostazioni e risultati sono salvati sul server.</p>
       <form id="pwForm" style="padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--line)">
@@ -469,6 +528,7 @@ body:has(textarea:focus,input:not([type=range]):not([type=checkbox]):focus) nav{
   <button data-view="koch" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="7" rx="1.5"/><rect x="17" y="14" width="4" height="7" rx="1.5"/></svg>Esercizio</button>
   <button data-view="instant"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Rapido</button>
   <button data-view="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg>Statistiche</button>
+  <button data-view="class" id="navClass" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.2A5 5 0 0 1 21 19"/></svg>Classe</button>
   <button data-view="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>Impostazioni</button>
 </div></nav>
 
